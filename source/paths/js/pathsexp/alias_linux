@@ -1,0 +1,3 @@
+alias cdexp='cd /home/mdm/dev/paths/js/pathsexp'
+alias cdc='cd ~/dev/paths/js/pathsexp/inagraph'
+# PC browserify --debug index.js --standalone InitInaGraph > ../../../html/inagraph_bundle.js

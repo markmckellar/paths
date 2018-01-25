@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<head>
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<title>Paths demo 0.1</title>
+
+<script src="../js/common/jquery-3.1.1.min.js"></script>
+<script src="./inagraph_bundle.js"></script>
+
+<style>
+canvas {
+    border: 3px #CCC solid;
+    touch-action: none;
+}
+
+.nodeinfoclass {
+    border-radius: 25px;
+    background: #ffffff;
+    border: 2px solid #4a4aaa;    
+    padding: 20px;
+    position:absolute;
+    visibility:hidden;
+    opacity:0.75;
+    left=0px;
+    top=0px;
+    xxxwidth=0px;
+    xxxheight=0px;
+}
+</style>
+</head>
+ 
+<body>
+<div xclass="nodeinfo tooltip" id="tooltip_element" title="niiiiiiiiiice"></div> 
+<div class="nodeinfoclass" id="nodeinfo"></div> 
+
+
+<div id="info" xclass="nodeinfo"></div>
+<div id="container">
+<canvas id="myCanvas" height="600" width="600"></canvas>    
+</div>
+
+<div class='box'></div>
+<button id='animationControlButton' value='play' onclick="playControlClicked()">Play</button>
+<div id="world_date"></div>
+<div id="world_date2"></div>
+
+<script>
+var world;
+$(document).ready(function()
+{
+		var worldDef = {};		
+		var initInaGraph = new InitInaGraph(InitInaGraph.getHtmlCanvasHolder('myCanvas',worldDef));
+		world = initInaGraph.world;
+		initInaGraph.worldDef.initCustomNodes(world);
+});
+function playControlClicked()
+{
+	if(world.isAnimated)
+	{
+		world.pause();
+		$("#animationControlButton").html('Play');
+	}
+	else
+	{
+		world.play();
+		$("#animationControlButton").html('Pause');		
+	}
+}
+
+</script>
+
+
+</body>
+</html>

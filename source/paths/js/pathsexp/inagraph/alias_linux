@@ -1,0 +1,4 @@
+alias bw='browserify --debug initinagraph.js --standalone InitInaGraph > ../../../html/inagraph_bundle.js'
+alias nd='nodejs index.js'
+alias cdc='cd ~/dev/paths/js/pathsexp/inagraph'
+# PC browserify --debug initinagraph.js --standalone InitInaGraph > ../../../html/inagraph_bundle.js

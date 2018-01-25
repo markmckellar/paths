@@ -1,0 +1,5 @@
+alias bw='browserify --debug pathclient.js --standalone PathClient > ../../../html/inagraph_bundle.js'
+alias nd='nodejs index.js'
+alias cdc='cd ~/dev/paths/js/pathsexp/inagraph'
+# PC browserify --debug pathclient.js --standalone PathClient > ../../../html/inagraph_bundle.js
+# cd C:\Users\mm\workspace_elcipse_install_20161020\xpaths\paths\js

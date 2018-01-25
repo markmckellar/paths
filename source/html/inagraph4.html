@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<head>
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<title>Paths demo 0.1</title>
+
+<script src="../js/common/jquery-3.1.1.min.js"></script>
+<script src="./inagraph_bundle.js"></script>
+
+<style>
+canvas {
+    border: 3px #CCC solid;
+    touch-action: none;
+}
+
+.nodeinfoclass {
+    border-radius: 25px;
+    background: #ffffff;
+    border: 2px solid #4a4aaa;    
+    padding: 20px;
+    position:absolute;
+    visibility:hidden;
+    opacity:0.75;
+    left=0px;
+    top=0px;
+    xxxwidth=0px;
+    xxxheight=0px;
+}
+</style>
+</head>
+ 
+<body>
+<div xclass="nodeinfo tooltip" id="tooltip_element" title="niiiiiiiiiice"></div> 
+<div class="nodeinfoclass" id="nodeinfo"></div> 
+
+
+<div id="info" xclass="nodeinfo"></div>
+<div id="container">
+<canvas id="myCanvas" height="600" width="600"></canvas>    
+</div>
+
+<div class='box'></div>
+<button id='animationControlButton' value='play' onclick="playControlClicked()">Play</button>
+<div id="world_date"></div>
+<div id="world_date2"></div>
+
+<script>
+var world;
+var counter = 0;
+var  lastTimeDelta = 0;
+var  lastTimeMove = 0;
+
+$(document).ready(function()
+{
+		var worldDef = {};		
+		var initInaGraph = new InitInaGraph(InitInaGraph.getHtmlCanvasHolder('myCanvas',worldDef));
+		world = initInaGraph.world;
+		doDraw();
+		setInterval(doDraw,250);
+		
+});
+
+function doDraw()
+{
+	//console.log("doDraw... oh yeah!:"+counter);
+	if(counter==0) getData();
+	else
+	{
+		getDelta(lastTimeDelta);
+		pushUserMovments();
+	}
+	//counter++;
+}    				
+
+function playControlClicked()
+{
+	if(world.isAnimated)
+	{
+		world.pause();
+		$("#animationControlButton").html('Play');
+	}
+	else
+	{
+		world.play();
+		$("#animationControlButton").html('Pause');	
+		doDraw();	
+	}
+}
+
+function pushUserMovments()
+{
+	Object.keys(world.nodeCanvasMouse.nodeMouseMovment).forEach(function (key)
+	{
+		var movePosition = InitInaGraph.getPosition().getAveragePostionFromPositionList(world.nodeCanvasMouse.nodeMouseMovment[key].movePostionArray);
+		world.nodeCanvasMouse.nodeMouseMovment[key].movePostionArray.length = 0;
+		delete world.nodeCanvasMouse.nodeMouseMovment[key];
+		
+		var moveMessage = 
+		{
+			nodeKey:key,
+			movePosition
+		}
+		sendServerJson(
+			"/paths/myCanvas/movenode/",
+			moveMessage);
+		console.log("movements for : "+key);
+	});
+	//world.nodeCanvasMouse.nodeMouseMovment[this.mouseStatus.node.getNodeKey()].movePostionArray.
+}
+
+function sendServerJson(url,json)
+{
+	var encodedJson = InitInaGraph.getCommon().jsonToURI(json);
+	fetch(url+encodedJson).then((resp) => resp.json()).then(
+  				function(data)
+  				{
+    				console.log("sent json to "+url);
+    			});
+  	
+ }
+
+function getDelta(deltaTime)
+{
+	var url = "/paths/myCanvas/delta/"+deltaTime+"/"+10;
+	fetch(url).then((resp) => resp.json()).then(
+  				function(data)
+  				{
+    				//console.log("got deltas:#="+data.length);
+    				//var newWorld = InitInaGraph.createPathWorldFromClientJson(world.canvasHolder,world.canvasHolder.worldDef,data)
+    				//console.log("filling world:worldName="+world.name);
+    				//InitInaGraph.fillPathWorldFromClientJson(world,data);
+    				
+    				//console.log(data);
+    				for(var i=0;i<data.length;i++)
+    				{
+    					var  oneData = data[i];
+    					//console.log("   ts="+timeStamp+" i="+i+" data  ts="+oneData.processTimestamp);
+    					//console.log("   "+oneData.walkerName+" "+oneData.junctionName);
+    					if(oneData.updateType== "junction")
+						{
+    						InitInaGraph.addToWorldUpdateQueue(world,oneData);
+    					}
+    					else if(oneData.updateType=="move")
+    					{
+    						console.log("move:"+InitInaGraph.getCommon().toString(oneData));
+    						/*
+    						move:{"nodeKey":":root_j274ypzp:2_j274yws6",
+    						"movePosition":{"x":167,"y":149},
+    						"processTimestamp":1493704316173,"updateType":"move"}
+    						*/
+    						if(world.doesNodeExist(oneData.nodeKey))
+    						{
+    							var node = world.getNode(oneData.nodeKey);
+    							if(!node.isSelected) node.position.setXY(oneData.movePosition.x,oneData.movePosition.y);
+    						}
+    					}
+    					lastTimeDelta = oneData.processTimestamp;
+    				}
+    			});
+  	
+ }
+
+
+function getData()
+{
+	//var url = "http://127.0.0.1:3000/paths/myCanvas";
+	var url = "/paths/myCanvas";
+	fetch(url).then((resp) => resp.json()).then(
+  				function(data)
+  				{
+    				//console.log("oh yeah!");
+    				//var newWorld = InitInaGraph.createPathWorldFromClientJson(world.canvasHolder,world.canvasHolder.worldDef,data)
+    				//console.log("filling world:worldName="+world.name);
+    				InitInaGraph.fillPathWorldFromClientJson(world,data);
+    				//console.log(data);
+    			});
+  	counter = 1;	
+ }
+
+</script>
+
+
+</body>
+</html>

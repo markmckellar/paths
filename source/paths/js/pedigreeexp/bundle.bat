@@ -1,0 +1,1 @@
+browserify --debug genericpedigreeclient.js --standalone GenericPedigreeClient > ../../html/pedigree_bundle.js
