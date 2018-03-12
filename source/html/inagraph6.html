@@ -4,7 +4,7 @@
 <title>Paths demo 0.1</title>
 
 <script src="../paths/js/common/jquery-3.1.1.min.js"></script>
-<script src="./inagraph_bundle.js"></script>
+<script src="./inagraph_sa_bundle.js"></script>
 
 <style>
 canvas {
@@ -49,10 +49,13 @@ var pathWorldClient;
 
 $(document).ready(function()
 {
-		var CanvasHolder = 	PathClient.getExports().CanvasHolder;
-		var InaGraphPathWorldDef = 	PathClient.getExports().InaGraphPathWorldDef;
-		
-		pathWorldClient = new PathClient(new CanvasHolder('myCanvas',new InaGraphPathWorldDef()));
+		var CanvasHolder = 	PathClientStandAlone.getExports().CanvasHolder;
+		var InaGraphPathWorldDef = 	PathClientStandAlone.getExports().InaGraphPathWorldDef;
+		var PushInaTestStandAlone = PathClientStandAlone.getExports().PushInaTestStandAlone;
+		var pushInaTestStandAlone = new PushInaTestStandAlone();
+
+		pathWorldClient = new PathClientStandAlone(new CanvasHolder('myCanvas',new InaGraphPathWorldDef()));
+		pushInaTestStandAlone.initCustomNodes(pathWorldClient.world);		
 		pathWorldClient.startAnimation();
 });
 

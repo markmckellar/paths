@@ -3,3 +3,6 @@ alias nd='nodejs index.js'
 alias cdc='cd ~/dev/paths/js/pathsexp/inagraph'
 # PC browserify --debug pathclient.js --standalone PathClient > ../../../html/inagraph_bundle.js
 # cd C:\Users\mm\workspace_elcipse_install_20161020\xpaths\paths\js
+
+# browserify --debug pathclientstandalone.js --standalone PathClientStandAlone > ../../../html/inagraph_sa_bundle.js
+# alias bw='browserify --debug pushinateststandalone.js --standalone PushInaTestStandAlone > ../../../html/inagraph_sa_bundle.js'
