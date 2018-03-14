@@ -1,8 +1,3 @@
-# walkers 
+This project is an implementation of a animated graph of nodes moving between varais stages and creating a network of visited locations reflecting the state changes.
 
-1) Install Node.js and gulp
-$ npm -g install gulp
-
-2) Install dependencies and their type definitions:
-$ npm install
-```
+A screenshot of an example graph : http://exp.blackdoge.com/paths_wiki/resources/images/paths_demo1.JPG
