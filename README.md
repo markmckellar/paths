@@ -4,3 +4,5 @@ A few notes about the current state :
 * This project is the result of an experiment for the idea of a animated node state graph.  Currently it lacks docs and is quite organized.  It is being rewritten in typescript as a new project [here](https://github.com/markmckellar/walkers)
 * It is implemented in JavaScript.  I does make use of the [class declaration](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Classes).  With that being said it will likely not run on older versions of IE (I don't generally run IE but I know it fails on IE11 and below). I have tested it on the current versions of chrome and firefox as of March-2018.
 * A screenshot of an example graph : [paths_demo1.JPG](http://exp.blackdoge.com/paths_wiki/resources/images/paths_demo1.JPG)
+* A demo is running [here](http://exp.blackdoge.com/paths_wiki/html/demograph1.html).  Note the above that currently only chrome and firefox have been tested.  Hit "Play" to start the animation.
+* The current version of the code allows for running a stand alone graph running in the browser or a shared graph running on a server that can be accessed/manipulated by html clients.
