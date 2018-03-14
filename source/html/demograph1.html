@@ -22,8 +22,6 @@ canvas {
     opacity:0.75;
     left=0px;
     top=0px;
-    xxxwidth=0px;
-    xxxheight=0px;
 }
 </style>
 </head>
@@ -33,7 +31,8 @@ canvas {
 <div class="nodeinfoclass" id="nodeinfo"></div> 
 
 
-<div id="info" xclass="nodeinfo"></div>
+<div id="info" class="nodeinfo"></div>
+Click "Play" to start the anmation<br>
 <div id="container">
 <canvas id="myCanvas" height="600" width="600"></canvas>    
 </div>
@@ -41,7 +40,6 @@ canvas {
 <div class='box'></div>
 <button id='animationControlButton' value='play' onclick="playControlClicked()">Play</button>
 <div id="world_date"></div>
-<div id="world_date2"></div>
 
 <script>
 var pathWorldClient;
