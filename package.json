@@ -1,7 +1,7 @@
 {
   "name": "paths",
   "version": "2.0.0",
-  "description": "Animated graph of walkers moving between states, building a network of the paths they take.",
+  "description": "Live, animated map of work moving through a process: where work piles up, rework loops, and time in each state.",
   "private": true,
   "type": "module",
   "license": "MIT",

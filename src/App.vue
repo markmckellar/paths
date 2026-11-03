@@ -3,6 +3,7 @@ import { computed, markRaw, onBeforeUnmount, onMounted, ref, shallowRef } from '
 import GraphCanvas from './components/GraphCanvas.vue'
 import BigClock from './components/BigClock.vue'
 import ShapeIcon from './components/ShapeIcon.vue'
+import { labScenario } from './demo/lab'
 import { pipelineScenario } from './demo/pipeline'
 import { timeUseScenarios } from './demo/timeuse'
 import type { WorldNode, WorldStats } from './engine/world'
@@ -12,7 +13,7 @@ import { Simulation } from './simulation'
 const SPEEDS = [0.5, 1, 2, 4, 8]
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
-const SCENARIOS: Scenario[] = [pipelineScenario, ...timeUseScenarios()]
+const SCENARIOS: Scenario[] = [pipelineScenario, labScenario, ...timeUseScenarios()]
 /** Picker entries grouped under their headings, in order. */
 const scenarioGroups = [...new Set(SCENARIOS.map((s) => s.group))].map((group) => ({
   group,

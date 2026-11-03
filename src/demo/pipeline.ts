@@ -10,13 +10,20 @@ import type { Scenario } from '../scenario'
  * back for rework, so the graph grows loops and two-way paths.
  */
 
-interface Step {
+export interface Step {
   state: string
   /** Optional rework: with probability `chance`, go back to `to` instead of moving on. */
   rework?: { to: string; chance: number }
+  /**
+   * Optional side trip: with probability `chance`, visit `state` (e.g. "On Hold") and then
+   * come back and repeat this step.
+   */
+  detour?: { state: string; chance: number }
+  /** How long this step takes compared with a normal one (default 1). */
+  duration?: number
 }
 
-interface Flow {
+export interface Flow {
   type: WalkerTypeDef
   /** Relative arrival rate. */
   weight: number
@@ -62,13 +69,14 @@ export const FLOWS: Flow[] = [
   },
 ]
 
-const FINAL_STATES = [...new Set(FLOWS.map((f) => f.steps[f.steps.length - 1].state))]
-
 /** Items linger at their final state for a while, then leave. */
-const EXITS: ExitRule[] = FINAL_STATES.map((junction) => ({ junction, afterMs: 12_000 }))
+export function finalStateExits(flows: Flow[], afterMs = 12_000): ExitRule[] {
+  const finals = [...new Set(flows.map((f) => f.steps[f.steps.length - 1].state))]
+  return finals.map((junction) => ({ junction, afterMs }))
+}
 
 export function demoWorldOptions(random: () => number): WorldOptions {
-  return { walkerTypes: FLOWS.map((f) => f.type), exits: EXITS, random }
+  return { walkerTypes: FLOWS.map((f) => f.type), exits: finalStateExits(FLOWS), random }
 }
 
 /** Mean gap between new items, in simulated ms. */
@@ -78,6 +86,17 @@ const MAX_STEP_MS = 7_000
 /** Stop looping on rework after this many visits to the same state. */
 const MAX_REWORK = 2
 
+/** Optional timing for a feed. */
+export interface FeedTiming {
+  /** Mean gap between new items, before scaling by `unitMs` (default 900). */
+  meanArrival?: number
+  /**
+   * Multiplies every time the feed makes. The default 1 gives steps of a few seconds; 1800 turns
+   * them into hours, for a scenario whose clock runs that much faster.
+   */
+  unitMs?: number
+}
+
 /**
  * Generates an endless, reproducible stream of updates. Call `fill(until)` to make sure
  * every item arriving before `until` has had its whole journey generated.
@@ -86,11 +105,21 @@ export class PipelineFeed {
   private readonly random: () => number
   private nextArrival: number
   private counters = new Map<string, number>()
-  private readonly totalWeight = FLOWS.reduce((s, f) => s + f.weight, 0)
+  private readonly totalWeight: number
+  private readonly unitMs: number
+  private readonly meanArrivalMs: number
 
-  constructor(seed: number, startTime: number) {
+  constructor(
+    seed: number,
+    startTime: number,
+    private readonly flows: Flow[] = FLOWS,
+    timing: FeedTiming = {},
+  ) {
+    this.unitMs = timing.unitMs ?? 1
+    this.meanArrivalMs = (timing.meanArrival ?? MEAN_ARRIVAL_MS) * this.unitMs
     this.random = seededRandom(seed)
     this.nextArrival = startTime
+    this.totalWeight = flows.reduce((s, f) => s + f.weight, 0)
   }
 
   fill(until: number): WorldUpdate[] {
@@ -98,18 +127,18 @@ export class PipelineFeed {
     while (this.nextArrival <= until) {
       out.push(...this.journey(this.pickFlow(), this.nextArrival))
       // Exponential gaps make arrivals bursty, like real work.
-      this.nextArrival += -Math.log(1 - this.random()) * MEAN_ARRIVAL_MS
+      this.nextArrival += -Math.log(1 - this.random()) * this.meanArrivalMs
     }
     return out
   }
 
   private pickFlow(): Flow {
     let r = this.random() * this.totalWeight
-    for (const f of FLOWS) {
+    for (const f of this.flows) {
       r -= f.weight
       if (r <= 0) return f
     }
-    return FLOWS[FLOWS.length - 1]
+    return this.flows[this.flows.length - 1]
   }
 
   private journey(flow: Flow, start: number): WorldUpdate[] {
@@ -126,7 +155,14 @@ export class PipelineFeed {
       updates.push({ time, walker, walkerType: flow.type.key, junction: step.state })
       const seen = (visits.get(step.state) ?? 0) + 1
       visits.set(step.state, seen)
-      time += MIN_STEP_MS + this.random() * (MAX_STEP_MS - MIN_STEP_MS)
+      time += this.stepMs(step.duration)
+
+      const detour = step.detour
+      if (detour && seen <= MAX_REWORK && this.random() < detour.chance) {
+        updates.push({ time, walker, walkerType: flow.type.key, junction: detour.state })
+        time += this.stepMs()
+        continue // back to this step
+      }
 
       const rework = step.rework
       if (rework && seen <= MAX_REWORK && this.random() < rework.chance) {
@@ -139,6 +175,10 @@ export class PipelineFeed {
       i++
     }
     return updates
+  }
+
+  private stepMs(duration = 1): number {
+    return (MIN_STEP_MS + this.random() * (MAX_STEP_MS - MIN_STEP_MS)) * duration * this.unitMs
   }
 }
 

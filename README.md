@@ -3,6 +3,7 @@
 **A live, animated map of work moving through a process.**
 
 **[Try the live demo →](https://markmckellar.github.io/paths/)** ·
+**[Lab samples →](https://markmckellar.github.io/paths/#lab)** ·
 **[A day in the life →](https://markmckellar.github.io/paths/#life-weekday)** ·
 **[Configure it with your own data ↓](#configure-it)**
 
@@ -14,13 +15,20 @@ sit in each state.
 ![Paths: work items flowing through a delivery pipeline, with a state's flow details open](docs/screenshot.png)
 
 The engine is generic: it draws any stream of "item X entered state Y at time T" events, such as samples moving
-through lab processing steps, orders through fulfillment, or tickets through support. The demo has two kinds of
+through lab processing steps, orders through fulfillment, or tickets through support. The demo has three kinds of
 data, chosen from the picker at the top:
 
 - **Delivery pipeline.** Bugs, features and chores moving through a software delivery process.
+- **Lab samples.** Patient samples moving through a genetic testing lab, from arrival to signed-out report
+  (made-up data). Blood, saliva and tumor samples share extraction, library prep, sequencing, analysis and
+  review, so you can see where they converge and queue up (long sequencing runs build a backlog). Failed QC
+  sends a sample back a step, a requisition missing information goes on hold, and a tumor sample can need more
+  tissue before it carries on.
 - **A day in the life.** Real people's days from the American Time Use Survey: when they sleep, commute, work,
   eat, look after others and relax. Pick everyone on a weekday or weekend, or day-shift workers, night-shift
   workers, students, homemakers or retirees, and watch the day go round a clock-like circle of activities.
+
+![Lab samples: blood, saliva and tumor samples moving through a genetic testing lab, with a backlog at sequencing](docs/screenshot-lab.png)
 
 ![A day in the life: 400 people from the American Time Use Survey at 1:18pm on a weekday, most at work, lunch or school](docs/screenshot-day.png)
 
@@ -35,7 +43,7 @@ data, chosen from the picker at the top:
   on a touch screen.
 - **Control time.** Play, pause, and run from ½× to 8× speed. Turn on the big clock to see the time of day (and,
   for a day's data, how far through the day it is) right on the graph.
-- **Switch data sets.** Each one has its own link (for example `#life-night`), so you can share a view.
+- **Switch data sets.** Each one has its own link (for example `#lab` or `#life-night`), so you can share a view.
 
 Works in light and dark mode, on desktop and on phones.
 
@@ -169,6 +177,39 @@ fill(until: number): WorldUpdate[] {
 To use a newer survey year, download its files, re-run the script with that year, and point the import at the new
 JSON file.
 
+### Example: a lab workflow in a few lines
+
+The delivery pipeline and lab samples share one generator ([`src/demo/pipeline.ts`](src/demo/pipeline.ts)).
+A data set is a list of flows: each sample type, how often it arrives, and its steps. A step can send items back
+(`rework`), take a side trip and return (`detour`), or take longer than usual (`duration`). The lab scenario
+([`src/demo/lab.ts`](src/demo/lab.ts)) is mostly this:
+
+```ts
+const DNA_CORE: Flow['steps'] = [
+  { state: 'DNA Extraction' },
+  { state: 'Library Prep', rework: { to: 'DNA Extraction', chance: 0.06 } },
+  { state: 'Sequencing', duration: 4, rework: { to: 'Library Prep', chance: 0.08 } },
+  { state: 'Analysis' },
+  { state: 'Variant Review', duration: 1.5, rework: { to: 'Analysis', chance: 0.1 } },
+  { state: 'Report Sign-off', rework: { to: 'Variant Review', chance: 0.05 } },
+  { state: 'Reported' },
+]
+
+{
+  type: { key: 'tumor', label: 'Tumor tissue (DNA)', color: '#3e8ef7', shape: 'square' },
+  weight: 2,
+  steps: [
+    { state: 'Received' },
+    { state: 'Accessioning', detour: { state: 'On Hold: Missing Info', chance: 0.08 } },
+    { state: 'Pathology Review', duration: 1.5, detour: { state: 'More Tissue Requested', chance: 0.15 } },
+    ...DNA_CORE,
+  ],
+}
+```
+
+To show a real lab instead, feed the engine its LIMS status history ("sample X entered step Y at time T"), and
+the same map shows the real bottlenecks and rework.
+
 ## Run it
 
 The [live demo](https://markmckellar.github.io/paths/) runs in any modern browser. To run it locally:
@@ -220,7 +261,7 @@ The demo is built and published to GitHub Pages by a GitHub Actions workflow
 ```
 src/engine/      simulation, physics, camera, canvas renderer (framework-free, unit tested)
 src/scenario.ts  what a data set provides: events, clock, wording, display options
-src/demo/        the delivery pipeline, and the time-use data and its feed (demo/timeuse/)
+src/demo/        the delivery pipeline and lab samples (generated), and the time-use data and its feed (demo/timeuse/)
 src/components/  Vue 3 components: GraphCanvas, NodePopover, ShapeIcon, BigClock
 src/App.vue      toolbar, data set picker, legend, keyboard shortcuts
 scripts/         build-timeuse.py: turns raw survey files into the time-use data
@@ -246,6 +287,9 @@ I also added the details panels, pinning, pan and zoom, touch support, dark mode
 Later I added the "day in the life" data sets from the American Time Use Survey. That meant growing the engine's
 configuration (recent-traffic paths, fixed-size outside labels, fixed layouts, a settled start, the big clock) and a
 faster way for items to spread out, so states holding hundreds of people stay smooth.
+
+Then I added the lab samples data set, closer to my day job building lab and reporting systems, along with side
+trips (holds) and longer steps in the workflow generator.
 
 ## Built with
 
