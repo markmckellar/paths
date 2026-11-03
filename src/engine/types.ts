@@ -51,12 +51,27 @@ export interface LayoutOptions {
   walkerSpreadElasticity: number
 }
 
+/** How junction labels are drawn. */
+export interface LabelOptions {
+  /** 'below' each junction (default), or 'outside': pointing away from the middle of the graph. */
+  placement: 'below' | 'outside'
+  /** Draw labels at this fixed on-screen size in px, at any zoom. Unset: they scale with the map. */
+  screenPx: number | null
+}
+
 export interface WorldOptions {
   walkerTypes: WalkerTypeDef[]
   exits?: ExitRule[]
   teleports?: RerouteRule[]
   endpointMods?: RerouteRule[]
   layout?: Partial<LayoutOptions>
+  /**
+   * If set, paths show recent traffic instead of all-time traffic: each one fades out over
+   * about this much simulated time after it was last used. Good for cyclic data such as a
+   * daily routine, where all-time paths soon connect everything to everything.
+   */
+  pathMemoryMs?: number
+  labels?: Partial<LabelOptions>
   /** Random source used for placement and jitter; inject a seeded one for determinism. */
   random?: () => number
 }

@@ -1,32 +1,56 @@
 <script setup lang="ts">
-import { markRaw, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
+import { computed, markRaw, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
 import GraphCanvas from './components/GraphCanvas.vue'
+import BigClock from './components/BigClock.vue'
 import ShapeIcon from './components/ShapeIcon.vue'
+import { pipelineScenario } from './demo/pipeline'
+import { timeUseScenarios } from './demo/timeuse'
 import type { WorldNode, WorldStats } from './engine/world'
-import { formatClock } from './format'
+import type { Scenario } from './scenario'
 import { Simulation } from './simulation'
 
 const SPEEDS = [0.5, 1, 2, 4, 8]
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
-const sim = markRaw(new Simulation())
-sim.world.speed = 2
+const SCENARIOS: Scenario[] = [pipelineScenario, ...timeUseScenarios()]
+/** Picker entries grouped under their headings, in order. */
+const scenarioGroups = [...new Set(SCENARIOS.map((s) => s.group))].map((group) => ({
+  group,
+  items: SCENARIOS.filter((s) => s.group === group),
+}))
+const scenarioFromHash = (): Scenario => SCENARIOS.find((s) => `#${s.key}` === location.hash) ?? pipelineScenario
+
+const sim = markRaw(new Simulation(scenarioFromHash()))
 // Respect reduced-motion: start paused and let the user press play.
 sim.world.playing = !reducedMotion
+const scenario = shallowRef<Scenario>(sim.scenario)
 
 const graph = ref<InstanceType<typeof GraphCanvas>>()
 const selected = shallowRef<WorldNode | null>(null)
 const autoFit = ref(true)
 const playing = ref(sim.world.playing)
-const speed = ref(sim.world.speed)
+const speed = ref(sim.speedMultiplier)
 const clock = ref('')
+/** Big on-graph clock: on by default where the scenario asks for it; the toolbar toggles it. */
+const showBigClock = ref(sim.scenario.bigClock ?? false)
+const bigClock = ref<{ time: string; caption?: string; progress?: number; scale?: string[] }>({ time: '' })
 const stats = ref<WorldStats>(sim.world.stats())
 const typeCounts = ref<Record<string, number>>({})
 const showHelp = ref(true)
+/** The legend starts folded away on phones, where it would cover much of the graph. */
+const legendOpen = ref(window.innerWidth > 560)
 
 // The world isn't reactive; sample what the chrome shows a few times a second.
 function sample(): void {
-  clock.value = formatClock(sim.world.simTime)
+  clock.value = sim.scenario.formatClock(sim.world.simTime)
+  const sc = sim.scenario
+  const t = sim.world.simTime
+  bigClock.value = {
+    time: sc.formatClock(t),
+    caption: sc.timeCaption?.(t),
+    progress: sc.cycle ? (((t - sim.startedAt) % sc.cycle.lengthMs) / sc.cycle.lengthMs) * 100 : undefined,
+    scale: sc.cycle?.scale,
+  }
   stats.value = sim.world.stats()
   const counts: Record<string, number> = {}
   for (const w of sim.world.walkers.values()) if (!w.exiting) counts[w.type] = (counts[w.type] ?? 0) + 1
@@ -39,8 +63,32 @@ function togglePlay(): void {
 }
 
 function setSpeed(s: number): void {
-  sim.world.speed = s
+  sim.speedMultiplier = s
   speed.value = s
+}
+
+/** Switch data set from the picker (or a #link), and remember it in the address bar. */
+function selectScenario(next: Scenario): void {
+  if (next.key !== sim.scenario.key) {
+    sim.setScenario(next)
+    scenario.value = next
+    showBigClock.value = next.bigClock ?? false
+    selected.value = null
+    autoFit.value = true
+    graph.value?.snapToFit()
+    sample()
+  }
+  if (location.hash !== `#${next.key}`) history.replaceState(null, '', `#${next.key}`)
+}
+
+function onPick(e: Event): void {
+  const key = (e.target as HTMLSelectElement).value
+  const next = SCENARIOS.find((s) => s.key === key)
+  if (next) selectScenario(next)
+}
+
+function onHashChange(): void {
+  selectScenario(scenarioFromHash())
 }
 
 function restart(): void {
@@ -89,13 +137,18 @@ onMounted(() => {
   sample()
   timer = window.setInterval(sample, 250)
   window.addEventListener('keydown', onKey)
+  window.addEventListener('hashchange', onHashChange)
 })
 onBeforeUnmount(() => {
   clearInterval(timer)
   window.removeEventListener('keydown', onKey)
+  window.removeEventListener('hashchange', onHashChange)
 })
 
-const walkerTypes = [...sim.world.walkerTypes.values()]
+const walkerTypes = computed(() => {
+  void scenario.value
+  return [...sim.world.walkerTypes.values()]
+})
 </script>
 
 <template>
@@ -110,11 +163,20 @@ const walkerTypes = [...sim.world.walkerTypes.values()]
         </svg>
         <div>
           <h1>Paths</h1>
-          <p>Work items flowing through a delivery pipeline</p>
+          <p>{{ scenario.subtitle }}</p>
         </div>
       </div>
 
       <div class="controls">
+        <label class="picker">
+          <span class="visually-hidden">Data set</span>
+          <select :value="scenario.key" title="Choose a data set" @change="onPick">
+            <optgroup v-for="g in scenarioGroups" :key="g.group" :label="g.group">
+              <option v-for="s in g.items" :key="s.key" :value="s.key">{{ s.label }}</option>
+            </optgroup>
+          </select>
+        </label>
+
         <button
           type="button"
           class="btn primary"
@@ -145,7 +207,22 @@ const walkerTypes = [...sim.world.walkerTypes.values()]
           </button>
         </div>
 
-        <button type="button" class="btn" title="Restart with new data" @click="restart">
+        <button
+          type="button"
+          class="btn icon"
+          :class="{ active: showBigClock }"
+          :aria-pressed="showBigClock"
+          :title="showBigClock ? 'Hide the big clock' : 'Show a big clock on the graph'"
+          aria-label="Big clock"
+          @click="showBigClock = !showBigClock"
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+            <circle cx="8" cy="8" r="6.2" fill="none" stroke="currentColor" stroke-width="1.5" />
+            <path d="M8 4.6V8l2.4 1.6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </button>
+
+        <button type="button" class="btn" :title="scenario.restartHint" @click="restart">
           <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
             <path d="M2.5 7a4.5 4.5 0 1 0 1.4-3.3M2.5 2v2.8h2.8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
           </svg>
@@ -181,15 +258,15 @@ const walkerTypes = [...sim.world.walkerTypes.values()]
           <dd class="mono">{{ clock }}</dd>
         </div>
         <div>
-          <dt>In flight</dt>
+          <dt>{{ scenario.words.active }}</dt>
           <dd>{{ stats.activeWalkers }}</dd>
         </div>
-        <div>
+        <div v-if="scenario.showDone">
           <dt>Done</dt>
           <dd>{{ stats.completed }}</dd>
         </div>
         <div>
-          <dt>States</dt>
+          <dt>{{ scenario.words.states }}</dt>
           <dd>{{ stats.junctions }}</dd>
         </div>
       </dl>
@@ -198,14 +275,33 @@ const walkerTypes = [...sim.world.walkerTypes.values()]
     <main class="main">
       <GraphCanvas ref="graph" v-model:selected="selected" v-model:auto-fit="autoFit" :sim="sim" />
 
-      <aside class="legend" aria-label="Legend">
-        <ul>
+      <BigClock
+        v-if="showBigClock"
+        :time="bigClock.time"
+        :caption="bigClock.caption"
+        :progress="bigClock.progress"
+        :scale="bigClock.scale"
+      />
+
+      <aside class="legend" :class="{ folded: !legendOpen }" aria-label="Legend">
+        <button
+          type="button"
+          class="legend-toggle"
+          :aria-expanded="legendOpen"
+          @click="legendOpen = !legendOpen"
+        >
+          {{ legendOpen ? 'Hide key' : `Key · ${walkerTypes.length} ${walkerTypes.length === 1 ? 'type' : 'types'}` }}
+        </button>
+        <ul v-show="legendOpen">
           <li v-for="t in walkerTypes" :key="t.key">
             <ShapeIcon :shape="t.shape" :color="t.color" />
             <span>{{ t.label }}</span>
             <span class="count">{{ typeCounts[t.key] ?? 0 }}</span>
           </li>
         </ul>
+        <p v-if="scenario.credit" v-show="legendOpen" class="credit">
+          Data: <a :href="scenario.credit.url" target="_blank" rel="noopener">{{ scenario.credit.text }}</a>
+        </p>
       </aside>
 
       <aside v-if="showHelp" class="help">
@@ -230,6 +326,42 @@ const walkerTypes = [...sim.world.walkerTypes.values()]
 </template>
 
 <style scoped>
+.picker select {
+  height: 32px;
+  max-width: 240px;
+  padding: 0 28px 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+.picker select:hover {
+  background: var(--surface-2);
+}
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+.credit {
+  max-width: 230px;
+  margin: 8px 0 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+.credit a {
+  color: inherit;
+}
+
 .app {
   display: grid;
   grid-template-rows: auto 1fr;
@@ -407,6 +539,16 @@ const walkerTypes = [...sim.world.walkerTypes.values()]
   gap: 8px;
   line-height: 22px;
 }
+.legend-toggle {
+  display: none;
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--accent);
+  cursor: pointer;
+}
 .legend .count {
   margin-left: auto;
   padding-left: 16px;
@@ -475,6 +617,22 @@ kbd {
   }
 }
 
+@media (max-width: 560px) {
+  .legend-toggle {
+    display: block;
+  }
+  .legend:not(.folded) .legend-toggle {
+    margin-bottom: 4px;
+  }
+  .picker {
+    flex: 1 1 100%;
+  }
+  .picker select {
+    width: 100%;
+    max-width: none;
+  }
+}
+
 @media (max-width: 480px) {
   .bar {
     gap: 8px;
@@ -490,7 +648,8 @@ kbd {
     display: none;
   }
   .controls {
-    flex-wrap: nowrap;
+    /* the data-set picker takes its own row; the buttons fit on the row below */
+    flex-wrap: wrap;
     gap: 6px;
   }
   .btn.primary {

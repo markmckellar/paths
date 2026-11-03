@@ -1,5 +1,7 @@
 import { seededRandom } from '../engine/geometry'
 import type { ExitRule, WalkerTypeDef, WorldOptions, WorldUpdate } from '../engine/types'
+import { formatClock } from '../format'
+import type { Scenario } from '../scenario'
 
 /**
  * Demo: work items flowing through a delivery pipeline.
@@ -138,4 +140,26 @@ export class PipelineFeed {
     }
     return updates
   }
+}
+
+/** The original demo: bugs, features and chores moving through a delivery pipeline. */
+export const pipelineScenario: Scenario = {
+  key: 'pipeline',
+  group: 'Work items',
+  label: 'Delivery pipeline',
+  subtitle: 'Work items flowing through a delivery pipeline',
+  words: { state: 'State', states: 'States', active: 'In flight', journey: 'Journey' },
+  timeScale: 1,
+  defaultSpeed: 2,
+  showDone: true,
+  restartHint: 'Restart with new data',
+  startTime() {
+    // Start the clock at a fixed time of day so the displayed clock reads sensibly.
+    const start = new Date()
+    start.setHours(9, 0, 0, 0)
+    return start.getTime()
+  },
+  worldOptions: demoWorldOptions,
+  createFeed: (seed, startTime) => new PipelineFeed(seed, startTime),
+  formatClock,
 }

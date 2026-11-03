@@ -58,13 +58,100 @@ export function render(
   for (const j of world.junctions.values()) drawJunction(ctx, world, j, theme, state, px)
   for (const w of world.walkers.values()) drawWalker(ctx, world, w, theme, state, px)
 
-  // Labels last so walkers in transit never cover them. Skip when too small to read.
-  ctx.font = `600 ${LABEL_FONT_PX}px ${theme.font}`
-  const showLabels = LABEL_FONT_PX * z >= 6
+  // Labels last so walkers in transit never cover them. Map-scaled labels are skipped when
+  // too small to read; fixed-size labels (labels.screenPx) are always shown.
+  const { placement } = world.labels
+  const screenPx = fixedLabelPx(world, view)
+  const fontPx = screenPx ? screenPx / z : LABEL_FONT_PX
+  const scale = fontPx / LABEL_FONT_PX
+  ctx.font = `${screenPx ? 700 : 600} ${fontPx}px ${theme.font}`
+  const showLabels = screenPx !== null || LABEL_FONT_PX * z >= 6
+  const middle = placement === 'outside' ? graphMiddle(world) : null
   for (const j of world.junctions.values()) {
-    measureLabel(ctx, j)
-    if (showLabels) drawLabel(ctx, j, theme, state.selected === j)
+    measureLabel(ctx, j, scale)
+    j.labelRect = placement === 'outside' ? labelRect(j, scale, middle!) : null
   }
+  if (placement === 'outside') separateLabels([...world.junctions.values()], middle!, fontPx)
+  if (showLabels) for (const j of world.junctions.values()) drawLabel(ctx, j, theme, state.selected === j, scale)
+}
+
+/** Nudge outside labels that overlap a neighbour further outward until they're clear. */
+function separateLabels(list: Junction[], middle: Vec, fontPx: number): void {
+  const overlaps = (a: Junction, b: Junction) => {
+    const p = a.labelRect!
+    const q = b.labelRect!
+    return p.x < q.x + q.w && q.x < p.x + p.w && p.y < q.y + q.h && q.y < p.y + p.h
+  }
+  const step = fontPx * 0.35
+  for (let pass = 0; pass < 40; pass++) {
+    let moved = false
+    for (let i = 0; i < list.length; i++) {
+      for (let k = i + 1; k < list.length; k++) {
+        const a = list[i]
+        const b = list[k]
+        if (!a.labelRect || !b.labelRect || !overlaps(a, b)) continue
+        // Move whichever label sits further from the middle; it has room to go further out.
+        const far = Math.hypot(a.pos.x - middle.x, a.pos.y - middle.y) >= Math.hypot(b.pos.x - middle.x, b.pos.y - middle.y) ? a : b
+        const d = unit(far.pos.x - middle.x, far.pos.y - middle.y)
+        far.labelRect!.x += d.x * step
+        far.labelRect!.y += d.y * step
+        moved = true
+      }
+    }
+    if (!moved) break
+  }
+}
+
+/** On-screen size of fixed-size labels, a little smaller on narrow screens; null if labels scale. */
+export function fixedLabelPx(world: World, view: Viewport): number | null {
+  const px = world.labels.screenPx
+  return px ? Math.max(9, Math.min(px, view.width / 40)) : null
+}
+
+/** Screen px fixed-size labels need beside and above/below the graph when fitting the view. */
+export function labelMargin(world: World, zoom: number): { x: number; y: number } {
+  let width = 0
+  let height = 0
+  for (const j of world.junctions.values()) {
+    if (j.labelRect) {
+      width = Math.max(width, j.labelRect.w)
+      height = Math.max(height, j.labelRect.h)
+    }
+  }
+  return { x: width * zoom + LABEL_GAP, y: height * zoom + LABEL_GAP }
+}
+
+/** Centre of the graph's bounding box, which outside labels point away from. */
+function graphMiddle(world: World): Vec {
+  let minX = Infinity
+  let minY = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
+  for (const j of world.junctions.values()) {
+    minX = Math.min(minX, j.pos.x)
+    maxX = Math.max(maxX, j.pos.x)
+    minY = Math.min(minY, j.pos.y)
+    maxY = Math.max(maxY, j.pos.y)
+  }
+  return { x: (minX + maxX) / 2, y: (minY + maxY) / 2 }
+}
+
+/**
+ * Box for a label that sits just outside its junction, on the side facing away from the
+ * middle of the graph. A junction at the middle itself gets its label below.
+ */
+function labelRect(j: Junction, scale: number, middle: Vec): { x: number; y: number; w: number; h: number } {
+  const w = j.labelWidth
+  const h = LABEL_HEIGHT * scale
+  const gap = LABEL_GAP * scale
+  const dx = j.pos.x - middle.x
+  const dy = j.pos.y - middle.y
+  const d = Math.hypot(dx, dy)
+  const dir = d < 1 ? { x: 0, y: 1 } : { x: dx / d, y: dy / d }
+  // The point on the circle facing outward, then grow the box outward from it.
+  const px = j.pos.x + dir.x * (j.radius + gap)
+  const py = j.pos.y + dir.y * (j.radius + gap)
+  return { x: px - w / 2 + (dir.x * w) / 2, y: py - h / 2 + (dir.y * h) / 2, w, h }
 }
 
 function drawPath(
@@ -82,7 +169,15 @@ function drawPath(
   const len = Math.hypot(dx, dy)
   if (len < a.radius + b.radius + 2) return
 
-  const width = 1.4 + Math.log2(1 + path.count) * 0.9
+  // Recent-traffic mode: busy paths are bold, quiet ones fade away.
+  let traffic = path.count
+  let alpha = 1
+  if (world.pathMemoryMs) {
+    traffic = world.recentTraffic(path)
+    if (traffic < 0.3 && !highlighted) return
+    alpha = highlighted ? 1 : Math.min(1, 0.2 + traffic / 8)
+  }
+  const width = 1.4 + Math.log2(1 + traffic) * 0.9
   const arrow = 5 + width * 1.6
 
   // Two-way traffic: bow each direction to its own side so both arrows are visible.
@@ -97,6 +192,7 @@ function drawPath(
   const dir = unit(tip.x - ctrl.x, tip.y - ctrl.y)
   const shaftEnd = { x: tip.x - dir.x * arrow * 0.8, y: tip.y - dir.y * arrow * 0.8 }
 
+  ctx.globalAlpha = alpha
   ctx.strokeStyle = highlighted ? theme.accent : theme.path
   ctx.fillStyle = ctx.strokeStyle
   ctx.lineWidth = highlighted ? width + 2 * px : width
@@ -113,6 +209,7 @@ function drawPath(
   ctx.lineTo(tip.x - dir.x * arrow + dir.y * arrow * 0.55, tip.y - dir.y * arrow - dir.x * arrow * 0.55)
   ctx.closePath()
   ctx.fill()
+  ctx.globalAlpha = 1
 }
 
 function drawJunction(
@@ -159,7 +256,7 @@ function drawJunction(
     ctx.globalAlpha = 1
   }
 
-  if (j.pinned) {
+  if (j.pinned && !j.anchored) {
     const a = -Math.PI / 4
     ctx.beginPath()
     ctx.arc(x + Math.cos(a) * j.radius, y + Math.sin(a) * j.radius, Math.max(3, 4 * px), 0, TAU)
@@ -235,31 +332,33 @@ function labelCount(j: Junction): string {
   return n > 0 ? `  ${n}` : ''
 }
 
-function measureLabel(ctx: CanvasRenderingContext2D, j: Junction): void {
-  j.labelWidth = ctx.measureText(j.name + labelCount(j)).width + LABEL_PAD_X * 2
+function measureLabel(ctx: CanvasRenderingContext2D, j: Junction, scale = 1): void {
+  j.labelWidth = ctx.measureText(j.name + labelCount(j)).width + LABEL_PAD_X * 2 * scale
 }
 
-function drawLabel(ctx: CanvasRenderingContext2D, j: Junction, theme: Theme, selected: boolean): void {
+function drawLabel(ctx: CanvasRenderingContext2D, j: Junction, theme: Theme, selected: boolean, scale = 1): void {
   const w = j.labelWidth
-  const x = j.pos.x - w / 2
-  const y = j.pos.y + j.radius + LABEL_GAP
+  const h = LABEL_HEIGHT * scale
+  const r = j.labelRect
+  const x = r ? r.x : j.pos.x - w / 2
+  const y = r ? r.y : j.pos.y + j.radius + LABEL_GAP * scale
   ctx.beginPath()
-  ctx.roundRect(x, y, w, LABEL_HEIGHT, LABEL_HEIGHT / 2)
+  ctx.roundRect(x, y, w, h, h / 2)
   ctx.fillStyle = theme.labelBg
   ctx.fill()
-  ctx.lineWidth = selected ? 1.5 : 1
+  ctx.lineWidth = (selected ? 1.5 : 1) * scale
   ctx.strokeStyle = selected ? theme.accent : theme.labelBorder
   ctx.stroke()
 
   ctx.textBaseline = 'middle'
   ctx.textAlign = 'left'
-  const ty = y + LABEL_HEIGHT / 2 + 0.5
+  const ty = y + h / 2 + 0.5 * scale
   ctx.fillStyle = theme.labelText
-  ctx.fillText(j.name, x + LABEL_PAD_X, ty)
+  ctx.fillText(j.name, x + LABEL_PAD_X * scale, ty)
   const count = labelCount(j)
   if (count) {
     ctx.fillStyle = theme.labelMuted
-    ctx.fillText(count, x + LABEL_PAD_X + ctx.measureText(j.name).width, ty)
+    ctx.fillText(count, x + LABEL_PAD_X * scale + ctx.measureText(j.name).width, ty)
   }
 }
 

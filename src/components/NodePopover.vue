@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { WalkerTypeDef } from '../engine/types'
 import type { Junction, Path, Walker, World, WorldNode } from '../engine/world'
 import { formatDuration } from '../format'
+import type { ScenarioWords } from '../scenario'
 import ShapeIcon from './ShapeIcon.vue'
 
 const props = defineProps<{
@@ -10,7 +11,13 @@ const props = defineProps<{
   world: World
   anchor: { x: number; y: number; r: number }
   viewport: { width: number; height: number }
+  words: ScenarioWords
+  /** If set, history steps show this clock time instead of time since the item appeared. */
+  formatTimeOfDay?: (ms: number) => string
 }>()
+
+/** With clock times, show recent steps only: a person's history grows by a day every loop. */
+const RECENT_STEPS = 40
 
 const emit = defineEmits<{
   select: [node: WorldNode]
@@ -107,12 +114,14 @@ const walker = computed(() => {
     current: w.junction,
     inState: formatDuration(props.world.simTime - w.enteredAt),
     age: formatDuration(props.world.simTime - start),
-    journey: w.history.map((v, i) => ({
-      key: `${i}-${v.junction}`,
-      name: v.junction,
-      at: `+${formatDuration(v.time - start)}`,
-      current: i === w.history.length - 1 && !w.exiting,
-    })),
+    journey: w.history
+      .map((v, i) => ({
+        key: `${i}-${v.junction}`,
+        name: v.junction,
+        at: props.formatTimeOfDay ? props.formatTimeOfDay(v.time) : `+${formatDuration(v.time - start)}`,
+        current: i === w.history.length - 1 && !w.exiting,
+      }))
+      .slice(props.formatTimeOfDay ? -RECENT_STEPS : 0),
   }
 })
 
@@ -167,8 +176,8 @@ function release(j: Junction): void {
     <!-- Junction / state -->
     <template v-if="junction">
       <p class="kind">
-        State
-        <span v-if="junction.j.pinned" class="pill">
+        {{ words.state }}
+        <span v-if="junction.j.pinned && !junction.j.anchored" class="pill">
           Pinned
           <button type="button" class="link" @click="release(junction.j)">Release</button>
         </span>
@@ -231,7 +240,7 @@ function release(j: Junction): void {
       <p class="kind">{{ walker.type.label }}</p>
       <dl class="stats walker-stats">
         <div>
-          <dt>State</dt>
+          <dt>{{ words.state }}</dt>
           <dd v-if="walker.current && !walker.w.exiting">
             <button type="button" class="link strong" @click="selectJunction(walker.current.name)">
               {{ walker.current.name }}
@@ -244,11 +253,11 @@ function release(j: Junction): void {
           <dd>{{ walker.inState }}</dd>
         </div>
         <div>
-          <dt>Age</dt>
+          <dt>{{ formatTimeOfDay ? 'Followed for' : 'Age' }}</dt>
           <dd>{{ walker.age }}</dd>
         </div>
       </dl>
-      <h3>Journey</h3>
+      <h3>{{ words.journey }}</h3>
       <ol ref="journeyList" class="journey">
         <li v-for="step in walker.journey" :key="step.key" :class="{ current: step.current }">
           <button type="button" class="row" @click="selectJunction(step.name)">

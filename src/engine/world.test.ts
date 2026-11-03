@@ -313,3 +313,25 @@ describe('PipelineFeed', () => {
     }
   })
 })
+
+describe('recent-traffic paths (pathMemoryMs)', () => {
+  it('fades a path out after it stops being used, while keeping the all-time count', () => {
+    const world = new World({ walkerTypes: [{ key: 't', label: 'T', color: '#000', shape: 'circle' }], pathMemoryMs: 1000 })
+    world.apply({ time: 0, walker: 'w', walkerType: 't', junction: 'A' })
+    world.apply({ time: 0, walker: 'w', walkerType: 't', junction: 'B' })
+    world.apply({ time: 0, walker: 'w', walkerType: 't', junction: 'A' })
+    world.apply({ time: 0, walker: 'w', walkerType: 't', junction: 'B' })
+    const path = world.paths.get('A→B')!
+    expect(path.count).toBe(2)
+    expect(world.recentTraffic(path, 0)).toBeCloseTo(2)
+    expect(world.recentTraffic(path, 1000)).toBeCloseTo(2 / Math.E)
+    expect(world.recentTraffic(path, 10_000)).toBeLessThan(0.001)
+  })
+
+  it('keeps all-time traffic when no memory is set', () => {
+    const world = new World({ walkerTypes: [] })
+    const a = world.getOrCreateJunction('A', null)
+    const b = world.getOrCreateJunction('B', a)
+    expect(world.recentTraffic(world.getOrCreatePath(a, b))).toBe(0)
+  })
+})

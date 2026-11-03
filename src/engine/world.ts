@@ -14,6 +14,7 @@ import {
 import {
   DEFAULT_LAYOUT,
   type ExitRule,
+  type LabelOptions,
   type LayoutOptions,
   type RerouteRule,
   type WalkerTypeDef,
@@ -48,6 +49,8 @@ export class Junction {
   readonly kind = 'junction' as const
   pos: Vec
   pinned = false
+  /** Pinned by the data set's own layout (e.g. a fixed circle), so not marked as user-pinned. */
+  anchored = false
   dragging = false
   /** Animated outer radius; eases toward `targetRadius`. */
   radius: number
@@ -62,6 +65,8 @@ export class Junction {
   readonly incoming = new Set<Path>()
   /** Label width in world units, filled in by the renderer for hit-testing. */
   labelWidth = 0
+  /** Where the label was last drawn, in world units (set by the renderer). */
+  labelRect: { x: number; y: number; w: number; h: number } | null = null
 
   constructor(
     readonly name: string,
@@ -111,6 +116,8 @@ export class Walker {
 export class Path {
   count = 0
   lastTraversedAt = 0
+  /** Traffic with older traversals faded out; only kept when the world has `pathMemoryMs`. */
+  recent = 0
 
   constructor(
     readonly from: Junction,
@@ -140,9 +147,36 @@ function matches(pattern: string | RegExp, value: string): boolean {
   return typeof pattern === 'string' ? new RegExp(pattern).test(value) : pattern.test(value)
 }
 
+interface SpreadGrid {
+  spacing: number
+  cells: Map<number, Walker[]>
+}
+
+/** Integer key for a grid cell (fine for the few thousand cells either side of the origin we use). */
+function cellKey(cx: number, cy: number): number {
+  return (cx + 0x8000) * 0x10000 + (cy + 0x8000)
+}
+
+/** Walkers already inside their slice, bucketed into cells one spacing wide. */
+function buildSpreadGrid(slice: Slice, peers: Set<Walker>): SpreadGrid {
+  const spacing = Math.max(1, Math.sqrt(sectorArea(slice) / peers.size) * 1.01)
+  const cells = new Map<number, Walker[]>()
+  for (const w of peers) {
+    if (w.dragging || !sectorContains(slice, w.pos)) continue
+    const key = cellKey(Math.floor(w.pos.x / spacing), Math.floor(w.pos.y / spacing))
+    const cell = cells.get(key)
+    if (cell) cell.push(w)
+    else cells.set(key, [w])
+  }
+  return { spacing, cells }
+}
+
 export class World {
   readonly layout: LayoutOptions
   readonly walkerTypes: Map<string, WalkerTypeDef>
+  /** See `WorldOptions.pathMemoryMs`; null means paths show all-time traffic. */
+  readonly pathMemoryMs: number | null
+  readonly labels: LabelOptions
   readonly junctions = new Map<string, Junction>()
   readonly walkers = new Map<string, Walker>()
   readonly paths = new Map<string, Path>()
@@ -164,6 +198,8 @@ export class World {
   constructor(options: WorldOptions, startTime = 0) {
     this.layout = { ...DEFAULT_LAYOUT, ...options.layout }
     this.walkerTypes = new Map(options.walkerTypes.map((t) => [t.key, t]))
+    this.pathMemoryMs = options.pathMemoryMs ?? null
+    this.labels = { placement: 'below', screenPx: null, ...options.labels }
     this.exits = options.exits ?? []
     this.teleports = options.teleports ?? []
     this.endpointMods = options.endpointMods ?? []
@@ -252,6 +288,7 @@ export class World {
       if (drawPath) {
         const path = this.getOrCreatePath(from, target)
         path.count++
+        if (this.pathMemoryMs) path.recent = this.recentTraffic(path, time) + 1
         path.lastTraversedAt = time
       }
     }
@@ -316,6 +353,12 @@ export class World {
     return p
   }
 
+  /** A path's faded traffic as of `at` (default: now). 0 when the world keeps all-time traffic. */
+  recentTraffic(path: Path, at = this.simTime): number {
+    if (!this.pathMemoryMs) return 0
+    return path.recent * Math.exp(-Math.max(0, at - path.lastTraversedAt) / this.pathMemoryMs)
+  }
+
   hasPath(from: Junction, to: Junction): boolean {
     return this.paths.has(pathKey(from.name, to.name))
   }
@@ -362,6 +405,14 @@ export class World {
     }
   }
 
+  /**
+   * Run the layout for `steps` physics steps without moving the clock, so walkers start out
+   * settled in their junctions instead of spilling out of them.
+   */
+  settle(steps = 300): void {
+    for (let i = 0; i < steps; i++) this.step()
+  }
+
   /** One fixed physics step. */
   step(): void {
     for (const j of this.junctions.values()) this.updateSlices(j)
@@ -374,9 +425,11 @@ export class World {
 
   /** Junction footprint: the circle plus the label hanging below it. */
   private box(j: Junction): { cx: number; cy: number; hw: number; hh: number } {
-    const hw = Math.max(j.radius, j.labelWidth / 2)
+    // Labels placed outside a fixed layout point away from it, so only the circle needs room.
+    const labelBelow = this.labels.placement === 'below' && j.labelWidth > 0
+    const hw = labelBelow ? Math.max(j.radius, j.labelWidth / 2) : j.radius
     const top = j.pos.y - j.radius
-    const bottom = j.pos.y + j.radius + (j.labelWidth > 0 ? LABEL_GAP + LABEL_HEIGHT : 0)
+    const bottom = j.pos.y + j.radius + (labelBelow ? LABEL_GAP + LABEL_HEIGHT : 0)
     return { cx: j.pos.x, cy: (top + bottom) / 2, hw, hh: (bottom - top) / 2 }
   }
 
@@ -479,6 +532,10 @@ export class World {
 
   private stepWalkers(): void {
     const L = this.layout
+    // Spreading only needs nearby peers, so bucket each junction's walkers of a type into a grid
+    // (cells one spacing wide) once per step, and check the 3x3 cells around each walker. This
+    // keeps a junction holding hundreds of walkers cheap; comparing every pair was O(n²).
+    const grids = new Map<Set<Walker>, SpreadGrid>()
     for (const [name, w] of this.walkers) {
       if (w.exiting) {
         w.exitProgress = Math.min(1, w.exitProgress! + STEP_MS / EXIT_FADE_MS)
@@ -495,11 +552,21 @@ export class World {
       }
       // Inside the slice: spread out evenly using the slice area per walker as spacing.
       const peers = w.junction.occupants.get(w.type)!
-      const spacing = Math.max(1, Math.sqrt(sectorArea(slice) / peers.size) * 1.01)
+      let grid = grids.get(peers)
+      if (!grid) grids.set(peers, (grid = buildSpreadGrid(slice, peers)))
+      const { spacing, cells } = grid
+      const cx = Math.floor(w.pos.x / spacing)
+      const cy = Math.floor(w.pos.y / spacing)
       const targets: Vec[] = []
-      for (const other of peers) {
-        if (other === w || !sectorContains(slice, other.pos)) continue
-        if (dist(w.pos, other.pos) < spacing) targets.push(pointAtDistance(other.pos, w.pos, spacing, this.random))
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+          const cell = cells.get(cellKey(cx + dx, cy + dy))
+          if (!cell) continue
+          for (const other of cell) {
+            if (other === w) continue
+            if (dist(w.pos, other.pos) < spacing) targets.push(pointAtDistance(other.pos, w.pos, spacing, this.random))
+          }
+        }
       }
       if (targets.length) {
         const proposal = lerp(w.pos, mean(targets), L.walkerSpreadElasticity)
@@ -554,6 +621,11 @@ export class World {
     const list = [...this.junctions.values()].reverse()
     for (const j of list) {
       if (dist(j.pos, p) <= j.radius) return j
+      const r = j.labelRect
+      if (r) {
+        if (p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h) return j
+        continue
+      }
       const top = j.pos.y + j.radius + LABEL_GAP
       const half = j.labelWidth / 2
       if (p.x >= j.pos.x - half && p.x <= j.pos.x + half && p.y >= top && p.y <= top + LABEL_HEIGHT) return j
@@ -569,6 +641,23 @@ export class World {
     let maxX = -Infinity
     let maxY = -Infinity
     for (const j of this.junctions.values()) {
+      if (this.labels.screenPx) {
+        // Fixed-size labels take screen space, not map space: counting them here would make the
+        // fit zoom out, which makes them bigger in map units, and so on. The fit adds a margin.
+        minX = Math.min(minX, j.pos.x - j.radius)
+        maxX = Math.max(maxX, j.pos.x + j.radius)
+        minY = Math.min(minY, j.pos.y - j.radius)
+        maxY = Math.max(maxY, j.pos.y + j.radius)
+        continue
+      }
+      const r = j.labelRect
+      if (r) {
+        minX = Math.min(minX, j.pos.x - j.radius, r.x)
+        maxX = Math.max(maxX, j.pos.x + j.radius, r.x + r.w)
+        minY = Math.min(minY, j.pos.y - j.radius, r.y)
+        maxY = Math.max(maxY, j.pos.y + j.radius, r.y + r.h)
+        continue
+      }
       const halfW = Math.max(j.radius, j.labelWidth / 2)
       minX = Math.min(minX, j.pos.x - halfW)
       maxX = Math.max(maxX, j.pos.x + halfW)

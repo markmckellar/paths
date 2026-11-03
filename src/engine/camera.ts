@@ -40,13 +40,15 @@ export function zoomAt(cam: Camera, view: Viewport, screenPoint: Vec, factor: nu
 export function fitCamera(
   bounds: { minX: number; minY: number; maxX: number; maxY: number },
   view: Viewport,
-  padding: number,
+  /** Screen px to keep clear on each side; a number, or separate horizontal/vertical amounts. */
+  padding: number | { x: number; y: number },
   maxZoom = 1.4,
 ): Camera {
+  const pad = typeof padding === 'number' ? { x: padding, y: padding } : padding
   const w = Math.max(1, bounds.maxX - bounds.minX)
   const h = Math.max(1, bounds.maxY - bounds.minY)
   const zoom = clampZoom(
-    Math.min((view.width - padding * 2) / w, (view.height - padding * 2) / h, maxZoom),
+    Math.min(Math.max(1, view.width - pad.x * 2) / w, Math.max(1, view.height - pad.y * 2) / h, maxZoom),
   )
   return { x: (bounds.minX + bounds.maxX) / 2, y: (bounds.minY + bounds.maxY) / 2, zoom }
 }

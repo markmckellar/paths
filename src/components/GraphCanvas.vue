@@ -9,7 +9,7 @@ import {
   zoomAt,
 } from '../engine/camera'
 import type { Vec } from '../engine/geometry'
-import { type Theme, render } from '../engine/renderer'
+import { type Theme, labelMargin, render } from '../engine/renderer'
 import type { Path, WorldNode } from '../engine/world'
 import type { Simulation } from '../simulation'
 import NodePopover from './NodePopover.vue'
@@ -91,10 +91,15 @@ function frame(now: number): void {
   if (autoFit.value) {
     const b = world.bounds()
     if (b) {
-      const target = fitCamera(b, free, FIT_PADDING)
+      // Fixed-size labels aren't in the bounds (see World.bounds); leave room for them on screen.
+      const margin = world.labels.screenPx ? labelMargin(world, camera.zoom) : null
+      const padding = margin ? { x: FIT_PADDING / 2 + margin.x, y: FIT_PADDING / 2 + margin.y } : FIT_PADDING
+      const target = fitCamera(b, free, padding)
       target.y += inset / 2 / target.zoom
-      // Ease quickly at first so the initial graph appears without a slow zoom.
-      camera = easeCamera(camera, target, world.junctions.size <= 2 ? 1 : 0.05)
+      // Jump straight there right after a (re)start; otherwise ease, so the view moves smoothly.
+      const snap = snapFrames > 0 || world.junctions.size <= 2
+      if (snapFrames > 0) snapFrames--
+      camera = easeCamera(camera, target, snap ? 1 : 0.05)
     }
   } else if (inset > 0 && selected.value && !press) {
     // Keep the selected node visible above the sheet.
@@ -277,7 +282,10 @@ function endPress(isRelease: boolean): void {
   if (dragTarget) {
     dragTarget.dragging = false
     // Junctions stay where you drop them; double-click releases them back to the layout.
-    if (dragging && dragTarget.kind === 'junction') dragTarget.pinned = true
+    if (dragging && dragTarget.kind === 'junction') {
+      dragTarget.pinned = true
+      dragTarget.anchored = false // moved by hand now, so show it as pinned
+    }
   }
   if (isRelease && !dragging) selected.value = node
   press = null
@@ -327,9 +335,13 @@ function zoomBy(factor: number): void {
 }
 
 /** Jump straight to a fitted view (used after restart). */
+/** Frames left in which the auto-fit jumps instead of easing (labels are measured on the first). */
+let snapFrames = 3
+
 function snapToFit(): void {
   camera = { x: 0, y: 0, zoom: 1 }
   autoFit.value = true
+  snapFrames = 3
 }
 
 defineExpose({ zoomBy, snapToFit })
@@ -391,6 +403,8 @@ onBeforeUnmount(() => {
       v-if="popoverNode && anchor"
       :node="popoverNode"
       :world="sim.world"
+      :words="sim.scenario.words"
+      :format-time-of-day="sim.scenario.formatTimeOfDay"
       :anchor="anchor"
       :viewport="size"
       @select="(n) => (selected = n)"

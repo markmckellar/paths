@@ -8,3 +8,6 @@ dist/
 /build
 /.classpath
 /.project
+
+# raw survey downloads used by scripts/build-timeuse.py (not committed)
+data-raw/
