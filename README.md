@@ -43,7 +43,8 @@ data, chosen from the picker at the top:
   on a touch screen.
 - **Control time.** Play, pause, and run from ½× to 8× speed. Turn on the big clock to see the time of day (and,
   for a day's data, how far through the day it is) right on the graph.
-- **Switch data sets.** Each one has its own link (for example `#lab` or `#life-night`), so you can share a view.
+- **Switch data sets.** Each one has its own link (for example `#lab` or `#life-night`, or `?demo=lab` where a site
+  drops the `#` part), so you can share a view.
 
 Works in light and dark mode, on desktop and on phones.
 
