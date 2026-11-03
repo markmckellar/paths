@@ -19,7 +19,9 @@ const scenarioGroups = [...new Set(SCENARIOS.map((s) => s.group))].map((group) =
   group,
   items: SCENARIOS.filter((s) => s.group === group),
 }))
-const scenarioFromHash = (): Scenario => SCENARIOS.find((s) => `#${s.key}` === location.hash) ?? pipelineScenario
+/** Shown when the link names no data set. */
+const DEFAULT_SCENARIO = SCENARIOS.find((s) => s.key === 'life-weekday') ?? pipelineScenario
+const scenarioFromHash = (): Scenario => SCENARIOS.find((s) => `#${s.key}` === location.hash) ?? DEFAULT_SCENARIO
 
 const sim = markRaw(new Simulation(scenarioFromHash()))
 // Respect reduced-motion: start paused and let the user press play.

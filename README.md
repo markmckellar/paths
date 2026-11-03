@@ -2,9 +2,9 @@
 
 **A live, animated map of work moving through a process.**
 
-**[Try the live demo →](https://markmckellar.github.io/paths/)** ·
+**[Try the live demo →](https://markmckellar.github.io/paths/)** (opens on a day in the life) ·
 **[Lab samples →](https://markmckellar.github.io/paths/#lab)** ·
-**[A day in the life →](https://markmckellar.github.io/paths/#life-weekday)** ·
+**[Delivery pipeline →](https://markmckellar.github.io/paths/#pipeline)** ·
 **[Configure it with your own data ↓](#configure-it)**
 
 Each state in a workflow is a circle. Each item is a small shape that moves from state to state as its status
