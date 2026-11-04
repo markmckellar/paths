@@ -249,6 +249,7 @@ The simulation engine is plain TypeScript with no framework, so it can be tested
   overlapping.
 - **Filling the window.** The graph spreads out like a gas in a box until it fills the window. See below.
 - **Untangling.** Spring layouts tend to leave paths crossed, so the layout also untangles itself. See below.
+- **Settling down.** Once the graph is close enough to settled, the physics cools off and stops. See below.
 - **States.** Each state grows with the number of items in it and is divided into slices, one per item type.
   Items settle into their own slice and spread out evenly.
 - **Spreading.** Items inside a state spread out using a spatial grid, so states holding hundreds of items stay
@@ -274,9 +275,8 @@ The layout treats the window as a box and the graph as a gas inside it:
 - **Just enough pressure.** Too much "anti-gravity" would have states darting about like gas under pressure.
   So the spread only changes about 1% every half second. It grows while the walls barely push and there's
   room to spare, shrinks while they push hard and the graph fills the box, and otherwise stays put.
-- **Settling down.** Once nothing has changed for a few seconds and the graph has nearly stopped moving, the
-  springs cool off and stop, so a settled graph holds perfectly still instead of shimmering. A new state or
-  path, a drag, a window resize or a state swelling a lot wakes it again.
+- **Settling down.** Once the graph has found its shape it holds perfectly still. See
+  [below](#settling-down).
 - **Zoom only when needed.** States and labels show at their natural size. The view only zooms out when the
   graph won't fit even packed tight, and zooms back in once it has room again.
 
@@ -318,6 +318,29 @@ So when a crossing really can't be avoided, it stays where it is. Over 30 runs o
 crossed paths, and every run stopped moving within about the first minute. Before this, most runs kept a few
 crossings for good.
 
+### Settling down
+
+A spring layout never quite comes to rest. States keep growing and shrinking as items come and go, and the springs
+keep pushing a graph that fills the window against its walls. The result was a graph that shimmered and crept a
+few pixels a second forever. Close enough is good enough, so once the layout is nearly settled it cools off, the
+way force-directed layouts use a "temperature" that drops over time:
+
+- **When it's calm.** The layout counts as calm when nothing has changed for 3 seconds (no new states or paths,
+  no drags, pins or untangling moves, the window and spread steady) *and* the graph has nearly stopped moving.
+- **Nearly stopped means going nowhere.** Jiggling on the spot is fine; still heading somewhere isn't. So it
+  compares where states are with where they were 3 seconds earlier, rather than how far they travelled. A graph
+  still slowly unfolding keeps going, as does one pressed against two walls with lots of empty room the other
+  way (it's still turning to fit).
+- **Cooling.** Once calm, the springs fade out over 2 seconds and then stop. The spread stops changing too.
+- **Still safe.** Collisions and walls keep working while it's calm, so a growing state can't overlap another
+  or poke off the screen.
+- **Waking up.** Any change wakes it: a new state or path, a drag, pinning, an untangling move, a window resize.
+  So does a state growing or shrinking a lot (by half its size and at least 20 units). Smaller changes as
+  items come and go don't.
+
+On the lab and pipeline data, states moved about 9 units a second on average even when "settled". Now they stop
+completely within about a minute.
+
 The demo is built and published to GitHub Pages by a GitHub Actions workflow
 ([`deploy-demo.yml`](.github/workflows/deploy-demo.yml)) on every push to `master`, after the tests pass.
 
@@ -356,7 +379,9 @@ trips (holds) and longer steps in the workflow generator.
 
 Watching the lab graph showed that paths often stayed crossed, so I gave the layout a way to
 [untangle itself](#untangling-crossed-paths) without ever flipping back and forth, and to
-[fill the window](#filling-the-window) like a gas in a box, keeping clear of the clock and legend.
+[fill the window](#filling-the-window) like a gas in a box, keeping clear of the clock and legend. Then it
+[settles down](#settling-down) and holds still instead of shimmering forever. I also sped up drawing for
+the busiest data sets (cached text widths, fewer layout reads, a faster untangling search).
 
 ## Built with
 
