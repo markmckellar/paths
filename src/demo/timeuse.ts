@@ -136,6 +136,8 @@ export function timeUseScenarios(data: TimeUseData = atus2019 as TimeUseData): S
     const options: Omit<WorldOptions, 'random'> = {
       walkerTypes,
       layout: { walkerRadius: 3.6, minJunctionRadius: 14, walkerSeekElasticity: 0.07 },
+      // Activities are pinned round a circle, so there is nothing to spread out.
+      fillView: false,
       // Show where people are moving now; all-time paths would soon join everything to everything.
       pathMemoryMs: 40 * 60 * 1000,
       // Big, fixed-size labels outside the circle, clear of the people inside it.

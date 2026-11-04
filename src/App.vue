@@ -290,7 +290,7 @@ const walkerTypes = computed(() => {
         :scale="bigClock.scale"
       />
 
-      <aside class="legend" :class="{ folded: !legendOpen }" aria-label="Legend">
+      <aside class="legend" data-graph-overlay :class="{ folded: !legendOpen }" aria-label="Legend">
         <button
           type="button"
           class="legend-toggle"
@@ -311,7 +311,7 @@ const walkerTypes = computed(() => {
         </p>
       </aside>
 
-      <aside v-if="showHelp" class="help">
+      <aside v-if="showHelp" class="help" data-graph-overlay>
         <ul>
           <li><strong>Click</strong> a state or item for details</li>
           <li><strong>Drag</strong> a state to pin it &middot; <strong>double-click</strong> to release</li>

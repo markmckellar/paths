@@ -9,6 +9,7 @@ import {
   sectorCentroid,
   sectorContains,
   seededRandom,
+  segmentsCross,
 } from './geometry'
 import type { WorldOptions, WorldUpdate } from './types'
 import { World } from './world'
@@ -333,5 +334,136 @@ describe('recent-traffic paths (pathMemoryMs)', () => {
     const a = world.getOrCreateJunction('A', null)
     const b = world.getOrCreateJunction('B', a)
     expect(world.recentTraffic(world.getOrCreatePath(a, b))).toBe(0)
+  })
+})
+
+describe('untangling crossed paths', () => {
+  /** Paths between `pairs`, with every junction placed where the test says. */
+  function graph(world: World, pairs: [string, string][], at: Record<string, [number, number]>): void {
+    for (const [a, b] of pairs) {
+      const ja = world.getOrCreateJunction(a, null)
+      const jb = world.getOrCreateJunction(b, null)
+      world.getOrCreatePath(ja, jb)
+    }
+    for (const [name, [x, y]] of Object.entries(at)) world.junctions.get(name)!.pos = { x, y }
+  }
+
+  function crossings(world: World): number {
+    const paths = [...world.paths.values()]
+    let n = 0
+    for (let i = 0; i < paths.length; i++) {
+      for (let k = i + 1; k < paths.length; k++) {
+        const [p, q] = [paths[i], paths[k]]
+        if ([q.from, q.to].includes(p.from) || [q.from, q.to].includes(p.to)) continue
+        if (segmentsCross(p.from.pos, p.to.pos, q.from.pos, q.to.pos)) n++
+      }
+    }
+    return n
+  }
+
+  it('moves junctions so a chain no longer crosses itself', () => {
+    const world = makeWorld()
+    // A-B-C-D drawn as a Z with A-B crossing C-D.
+    graph(world, [['A', 'B'], ['B', 'C'], ['C', 'D']], { A: [0, 0], B: [300, 300], C: [300, 0], D: [0, 300] })
+    expect(crossings(world)).toBe(1)
+    world.settle(1200)
+    expect(crossings(world)).toBe(0)
+  })
+
+  it('leaves crossings alone when it cannot remove them, rather than flipping about', () => {
+    const world = makeWorld()
+    // K5 can't be drawn without a crossing.
+    const names = ['A', 'B', 'C', 'D', 'E']
+    const pairs: [string, string][] = []
+    for (let i = 0; i < names.length; i++) for (let k = i + 1; k < names.length; k++) pairs.push([names[i], names[k]])
+    const at: Record<string, [number, number]> = {}
+    names.forEach((n, i) => (at[n] = [Math.cos((i * TAU) / 5) * 250, Math.sin((i * TAU) / 5) * 250]))
+    graph(world, pairs, at)
+    world.settle(3000)
+    const moves = world.untangleMoves
+    world.settle(6000)
+    expect(world.untangleMoves).toBe(moves)
+    expect(crossings(world)).toBeGreaterThan(0)
+  })
+
+  it('can be turned off', () => {
+    const world = makeWorld({ untangle: false })
+    graph(world, [['A', 'B'], ['B', 'C'], ['C', 'D']], { A: [0, 0], B: [300, 300], C: [300, 0], D: [0, 300] })
+    world.settle(1200)
+    expect(world.untangleMoves).toBe(0)
+  })
+})
+
+describe('filling the room', () => {
+  function chain(world: World, n: number): void {
+    for (let i = 0; i < n; i++) {
+      const j = world.getOrCreateJunction(`S${i}`, null)
+      j.pos = { x: (i % 2) * 10, y: i * 60 - 150 } // a short column
+      j.labelWidth = 60
+      if (i > 0) world.getOrCreatePath(world.junctions.get(`S${i - 1}`)!, j)
+    }
+  }
+
+  const wide = { minX: -700, minY: -250, maxX: 700, maxY: 250 }
+
+  it('spreads out to fill a wide room and stays inside it', () => {
+    const world = makeWorld()
+    chain(world, 8)
+    world.room = wide
+    world.settle(4000)
+    const b = world.bounds()!
+    expect(b.maxX - b.minX).toBeGreaterThan(0.6 * 1400)
+    expect(b.minX).toBeGreaterThanOrEqual(wide.minX)
+    expect(b.maxX).toBeLessThanOrEqual(wide.maxX)
+    expect(b.minY).toBeGreaterThanOrEqual(wide.minY - 1)
+    expect(b.maxY).toBeLessThanOrEqual(wide.maxY + 1)
+  })
+
+  it('keeps junctions out of areas drawn over the graph', () => {
+    const world = makeWorld()
+    chain(world, 8)
+    world.room = wide
+    const legend = { minX: -700, minY: 50, maxX: -400, maxY: 250 }
+    world.keepOut = [legend]
+    world.settle(4000)
+    for (const j of world.junctions.values()) {
+      const inside = j.pos.x > legend.minX && j.pos.x < legend.maxX && j.pos.y > legend.minY && j.pos.y < legend.maxY
+      expect(inside).toBe(false)
+    }
+  })
+
+  it('settles instead of breathing in and out', () => {
+    const world = makeWorld()
+    chain(world, 8)
+    world.room = wide
+    world.settle(4000)
+    const spread = world.spread
+    world.settle(3000)
+    expect(world.spread).toBeCloseTo(spread, 5)
+  })
+
+  it('holds perfectly still once nothing has changed for a while, and wakes when something does', () => {
+    const world = makeWorld()
+    chain(world, 8)
+    world.room = wide
+    world.settle(4000)
+    expect(world.calm).toBe(true)
+    const before = [...world.junctions.values()].map((j) => ({ ...j.pos }))
+    world.settle(600)
+    const after = [...world.junctions.values()].map((j) => ({ ...j.pos }))
+    expect(after).toEqual(before)
+    world.getOrCreatePath(world.junctions.get('S0')!, world.junctions.get('S7')!)
+    world.step()
+    expect(world.calm).toBe(false)
+    expect(world.warmth).toBe(1)
+  })
+
+  it('leaves the spread alone without a room, or when turned off', () => {
+    for (const world of [makeWorld(), makeWorld({ fillView: false })]) {
+      chain(world, 8)
+      if (!world.fillView) world.room = wide
+      world.settle(1500)
+      expect(world.spread).toBe(1)
+    }
   })
 })

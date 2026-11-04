@@ -56,7 +56,7 @@ export function render(
 
   for (const path of world.paths.values()) drawPath(ctx, world, path, theme, state.highlightPaths.has(path), px)
   for (const j of world.junctions.values()) drawJunction(ctx, world, j, theme, state, px)
-  for (const w of world.walkers.values()) drawWalker(ctx, world, w, theme, state, px)
+  drawWalkers(ctx, world, cam, view, theme, state, px)
 
   // Labels last so walkers in transit never cover them. Map-scaled labels are skipped when
   // too small to read; fixed-size labels (labels.screenPx) are always shown.
@@ -181,7 +181,7 @@ function drawPath(
   const arrow = 5 + width * 1.6
 
   // Two-way traffic: bow each direction to its own side so both arrows are visible.
-  const curved = world.hasPath(b, a)
+  const curved = path.reverse !== null
   const nx = -dy / len
   const ny = dx / len
   const bow = curved ? Math.min(28, len * 0.18) : 0
@@ -268,38 +268,83 @@ function drawJunction(
   }
 }
 
-function drawWalker(
+/**
+ * Walkers are the most numerous thing drawn (hundreds in the time-use data), so they're batched:
+ * one path per type, filled and stroked once, instead of a fill and stroke each. Walkers off
+ * screen are skipped. Fading (exiting) walkers have their own opacity, so they're drawn singly.
+ */
+function drawWalkers(
   ctx: CanvasRenderingContext2D,
   world: World,
-  w: Walker,
+  cam: Camera,
+  view: Viewport,
   theme: Theme,
   state: RenderState,
   px: number,
 ): void {
-  const def = world.walkerTypes.get(w.type)
   const r = world.layout.walkerRadius
-  ctx.globalAlpha = w.exitProgress === null ? 1 : 1 - w.exitProgress
-  traceShape(ctx, def?.shape ?? 'circle', w.pos.x, w.pos.y, r)
-  ctx.fillStyle = def?.color ?? theme.path
-  ctx.fill()
+  // Visible area in world units, with a walker's width to spare.
+  const halfW = view.width / 2 / cam.zoom + r * 2
+  const halfH = view.height / 2 / cam.zoom + r * 2
+  const visible = (w: Walker) => Math.abs(w.pos.x - cam.x) <= halfW && Math.abs(w.pos.y - cam.y) <= halfH
+
+  const byType = new Map<string, Walker[]>()
+  const fading: Walker[] = []
+  for (const w of world.walkers.values()) {
+    if (!visible(w)) continue
+    if (w.exitProgress !== null) fading.push(w)
+    else {
+      const list = byType.get(w.type)
+      if (list) list.push(w)
+      else byType.set(w.type, [w])
+    }
+  }
+
   ctx.lineWidth = 0.8
   ctx.strokeStyle = theme.walkerStroke
-  ctx.stroke()
+  for (const [type, list] of byType) {
+    const def = world.walkerTypes.get(type)
+    const shape = def?.shape ?? 'circle'
+    ctx.beginPath()
+    for (const w of list) traceShape(ctx, shape, w.pos.x, w.pos.y, r, false)
+    ctx.fillStyle = def?.color ?? theme.path
+    ctx.fill()
+    ctx.stroke()
+  }
+  for (const w of fading) {
+    const def = world.walkerTypes.get(w.type)
+    ctx.globalAlpha = 1 - w.exitProgress!
+    traceShape(ctx, def?.shape ?? 'circle', w.pos.x, w.pos.y, r)
+    ctx.fillStyle = def?.color ?? theme.path
+    ctx.fill()
+    ctx.stroke()
+  }
+  ctx.globalAlpha = 1
 
-  if (state.selected === w || state.hovered === w) {
+  for (const w of [state.selected, state.hovered]) {
+    if (w?.kind !== 'walker' || w.exiting) continue
     ctx.beginPath()
     ctx.arc(w.pos.x, w.pos.y, r + 3.5 * px + 1, 0, TAU)
     ctx.lineWidth = (state.selected === w ? 2.5 : 1.5) * px
     ctx.strokeStyle = theme.accent
     ctx.stroke()
   }
-  ctx.globalAlpha = 1
 }
 
-export function traceShape(ctx: CanvasRenderingContext2D, shape: WalkerShape, x: number, y: number, r: number): void {
-  ctx.beginPath()
+/** Add a walker shape to the current path; `fresh` starts a new path first. */
+export function traceShape(
+  ctx: CanvasRenderingContext2D,
+  shape: WalkerShape,
+  x: number,
+  y: number,
+  r: number,
+  fresh = true,
+): void {
+  if (fresh) ctx.beginPath()
   switch (shape) {
     case 'circle':
+      // Start each circle at its own edge, so batched circles aren't joined by stray lines.
+      ctx.moveTo(x + r, y)
       ctx.arc(x, y, r, 0, TAU)
       break
     case 'square': {
@@ -332,8 +377,27 @@ function labelCount(j: Junction): string {
   return n > 0 ? `  ${n}` : ''
 }
 
+/**
+ * Text widths per pixel of font size, by font and text. Labels change rarely and measuring every
+ * frame adds up. Width grows in step with font size, so one measurement serves every size, even
+ * while fixed-size labels change size in map units as the view zooms.
+ */
+const textWidths = new Map<string, number>()
+
+function textWidth(ctx: CanvasRenderingContext2D, text: string): number {
+  const size = parseFloat(ctx.font.split(' ')[1]) || LABEL_FONT_PX
+  const key = ctx.font.replace(/[\d.]+px/, '') + '|' + text
+  let perPx = textWidths.get(key)
+  if (perPx === undefined) {
+    if (textWidths.size > 2000) textWidths.clear()
+    perPx = ctx.measureText(text).width / size
+    textWidths.set(key, perPx)
+  }
+  return perPx * size
+}
+
 function measureLabel(ctx: CanvasRenderingContext2D, j: Junction, scale = 1): void {
-  j.labelWidth = ctx.measureText(j.name + labelCount(j)).width + LABEL_PAD_X * 2 * scale
+  j.labelWidth = textWidth(ctx, j.name + labelCount(j)) + LABEL_PAD_X * 2 * scale
 }
 
 function drawLabel(ctx: CanvasRenderingContext2D, j: Junction, theme: Theme, selected: boolean, scale = 1): void {
@@ -358,7 +422,7 @@ function drawLabel(ctx: CanvasRenderingContext2D, j: Junction, theme: Theme, sel
   const count = labelCount(j)
   if (count) {
     ctx.fillStyle = theme.labelMuted
-    ctx.fillText(count, x + LABEL_PAD_X * scale + ctx.measureText(j.name).width, ty)
+    ctx.fillText(count, x + LABEL_PAD_X * scale + textWidth(ctx, j.name), ty)
   }
 }
 

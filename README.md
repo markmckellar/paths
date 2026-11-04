@@ -23,7 +23,8 @@ data, chosen from the picker at the top:
   (made-up data). Blood, saliva and tumor samples share extraction, library prep, sequencing, analysis and
   review, so you can see where they converge and queue up (long sequencing runs build a backlog). Failed QC
   sends a sample back a step, a requisition missing information goes on hold, and a tumor sample can need more
-  tissue before it carries on.
+  tissue before it carries on. A big clock shows the day, time and shift (day, evening or night), with a bar for how far
+  through the week it is.
 - **A day in the life.** Real people's days from the American Time Use Survey: when they sleep, commute, work,
   eat, look after others and relax. Pick everyone on a weekday or weekend, or day-shift workers, night-shift
   workers, students, homemakers or retirees, and watch the day go round a clock-like circle of activities.
@@ -35,7 +36,8 @@ data, chosen from the picker at the top:
 ## What you can do
 
 - **Watch it build itself.** States appear as items first reach them, and the layout arranges itself as the
-  network grows. The view follows the graph until you take over.
+  network grows, spreading out to fill the window and untangling crossed paths as it goes. The view follows
+  the graph until you take over.
 - **Ask a state what's going on.** Click a state to see how many items are there now (by type), total visits,
   the average time items spend there, and where items arrive from and go next, ranked by volume.
 - **Follow one item.** Click an item to see its whole journey with timings. Its route lights up on the map.
@@ -68,6 +70,8 @@ Paths has two layers, and everything specific to a data set is configuration rat
 | `pathMemoryMs` | Show **recent** traffic: each path fades out this long after it was last used. Unset, paths show all-time traffic. Use it for cyclic data such as daily routines. |
 | `labels.placement` | `'below'` each state (default), or `'outside'`: pointing away from the middle, for fixed layouts like a circle. |
 | `labels.screenPx` | Draw labels at a fixed on-screen size at any zoom (a little smaller on phones). Unset, they scale with the map. |
+| `fillView` | Spread the layout out to fill the window, keeping clear of the clock and legend ([how](#filling-the-window)). On by default; turn it off for fixed layouts. |
+| `untangle` | Move states now and then so fewer paths cross ([how](#untangling-crossed-paths)). On by default; `false` turns it off. |
 
 Junctions (states) can also be **pinned** in place. Set `anchored` as well for a deliberate layout, so they aren't
 marked as pinned by hand. `world.settle()` runs the layout ahead of time, so items start settled.
@@ -243,6 +247,8 @@ The simulation engine is plain TypeScript with no framework, so it can be tested
 - **Layout.** A small force-directed physics model runs at a fixed 60 steps a second, so it looks the same on any
   display. Paths act as springs, states push apart, and a collision pass keeps states and their labels from
   overlapping.
+- **Filling the window.** The graph spreads out like a gas in a box until it fills the window. See below.
+- **Untangling.** Spring layouts tend to leave paths crossed, so the layout also untangles itself. See below.
 - **States.** Each state grows with the number of items in it and is divided into slices, one per item type.
   Items settle into their own slice and spread out evenly.
 - **Spreading.** Items inside a state spread out using a spatial grid, so states holding hundreds of items stay
@@ -255,6 +261,62 @@ The simulation engine is plain TypeScript with no framework, so it can be tested
 - **UI.** Vue 3 components handle the toolbar, the details popover (a bottom sheet on phones), the legend, and
   keyboard and touch input. The simulation stays outside Vue's reactivity, so the UI never slows down the
   animation.
+
+### Filling the window
+
+The layout treats the window as a box and the graph as a gas inside it:
+
+- **Anti-gravity.** States push each other apart, and paths hold connected states together. Both scale with
+  one number, the *spread*, which slowly grows until the graph fills the box.
+- **Walls.** The window edges, and the clock, legend and tips drawn over the graph, are walls. A state that
+  pokes past one is pushed back, never more than a little per step, so nothing jumps. A wall pushes the whole
+  graph a little too, not just one corner of it, so a graph wedged into one side drifts back to the middle.
+- **Just enough pressure.** Too much "anti-gravity" would have states darting about like gas under pressure.
+  So the spread only changes about 1% every half second. It grows while the walls barely push and there's
+  room to spare, shrinks while they push hard and the graph fills the box, and otherwise stays put.
+- **Settling down.** Once nothing has changed for a few seconds and the graph has nearly stopped moving, the
+  springs cool off and stop, so a settled graph holds perfectly still instead of shimmering. A new state or
+  path, a drag, a window resize or a state swelling a lot wakes it again.
+- **Zoom only when needed.** States and labels show at their natural size. The view only zooms out when the
+  graph won't fit even packed tight, and zooms back in once it has room again.
+
+Because the walls squeeze from the sides, a long graph ends up lying along a wide window and folding up to fill
+a tall one, with no special code for turning it.
+
+### Untangling crossed paths
+
+A spring layout only cares about path *lengths*, so it has no reason to fix a crossing. Once a state ends up on
+the wrong side of a path, the springs are just as happy with it there. Left alone, the lab graph usually ended
+up with a few crossed paths that never went away.
+
+Finding the fewest possible crossings for any graph is NP-hard (very slow to compute exactly), and layered
+"flow chart" layouts that avoid crossings would lose the organic look. So Paths keeps the springs and adds two
+cheap fixes on top:
+
+1. **Place new states well.** When an item reaches a new state, the state is placed next to the one the item
+   came from, in whichever of 16 directions crosses the fewest existing paths and has the most room.
+2. **Fix crossings when they appear.** Twice a second the layout looks for a move that would leave strictly
+   fewer crossings (or paths running through a state), and slides the states there, carrying their items along.
+   It tries:
+   - moving one state to another spot around its neighbours, or swapping two states;
+   - **a group jumping over the path it crosses.** When path u→v crosses another path, the branch hanging off
+     u through v is mirrored across that path as one piece, keeping its shape. When moves are equally good, the
+     one that moves the least wins, so the smaller side does the jumping;
+   - **flipping one lobe of a twisted loop.** When routes split and join again (in the lab, DNA and RNA samples
+     go separate ways after pathology review and meet again at sign-off), the springs often twist the loop
+     into a figure-eight. Flipping one half untwists it.
+
+**It never flips about.** Some crossings can't be avoided, and the springs can slowly pull a state back over
+the path it jumped. Trying again and again would keep the graph twitching, so:
+- it makes one move at a time and waits for the layout to settle before looking again;
+- a move only counts as progress if the graph ends up with fewer crossings than it has *ever* had (since it
+  last grew). After three moves in a row that don't make progress, it stops until a new path appears;
+- each state waits longer after every move it makes;
+- states you've pinned or are dragging are never moved.
+
+So when a crossing really can't be avoided, it stays where it is. Over 30 runs of the lab data, 29 ended with no
+crossed paths, and every run stopped moving within about the first minute. Before this, most runs kept a few
+crossings for good.
 
 The demo is built and published to GitHub Pages by a GitHub Actions workflow
 ([`deploy-demo.yml`](.github/workflows/deploy-demo.yml)) on every push to `master`, after the tests pass.
@@ -291,6 +353,10 @@ faster way for items to spread out, so states holding hundreds of people stay sm
 
 Then I added the lab samples data set, closer to my day job building lab and reporting systems, along with side
 trips (holds) and longer steps in the workflow generator.
+
+Watching the lab graph showed that paths often stayed crossed, so I gave the layout a way to
+[untangle itself](#untangling-crossed-paths) without ever flipping back and forth, and to
+[fill the window](#filling-the-window) like a gas in a box, keeping clear of the clock and legend.
 
 ## Built with
 

@@ -73,6 +73,16 @@ export function labWorldOptions(random: () => number): WorldOptions {
   }
 }
 
+const WEEK_MS = 7 * 24 * 3600_000
+
+/** Which lab shift is on: day 7am-3pm, evening 3pm-11pm, night 11pm-7am. */
+function labShift(ms: number): string {
+  const hour = new Date(ms).getHours()
+  if (hour >= 7 && hour < 15) return 'Day shift'
+  if (hour >= 15 && hour < 23) return 'Evening shift'
+  return 'Night shift'
+}
+
 function formatLabClock(ms: number): string {
   return new Date(ms).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })
 }
@@ -97,4 +107,8 @@ export const labScenario: Scenario = {
   worldOptions: labWorldOptions,
   createFeed: (seed, startTime) => new PipelineFeed(seed, startTime, LAB_FLOWS, { meanArrival: 700, unitMs: UNIT_MS }),
   formatClock: formatLabClock,
+  bigClock: true,
+  timeCaption: labShift,
+  // The run starts Monday 7am, so the bar shows how far through the lab's week it is.
+  cycle: { lengthMs: WEEK_MS, scale: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun', 'Mon'] },
 }

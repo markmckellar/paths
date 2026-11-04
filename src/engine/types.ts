@@ -72,6 +72,16 @@ export interface WorldOptions {
    */
   pathMemoryMs?: number
   labels?: Partial<LabelOptions>
+  /**
+   * Move junctions now and then so fewer paths cross (default on). Only clear improvements are
+   * made, with growing pauses between moves, so the layout never flips back and forth.
+   */
+  untangle?: boolean
+  /**
+   * Spread the layout out to fill `World.room` (the window, set by the UI), keeping clear of
+   * `World.keepOut` (default on). Turn it off for fixed layouts.
+   */
+  fillView?: boolean
   /** Random source used for placement and jitter; inject a seeded one for determinism. */
   random?: () => number
 }

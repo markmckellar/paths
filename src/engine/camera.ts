@@ -58,3 +58,4 @@ export function easeCamera(cam: Camera, target: Camera, t: number): Camera {
   const logZ = Math.log(cam.zoom) + (Math.log(target.zoom) - Math.log(cam.zoom)) * t
   return { x: cam.x + (target.x - cam.x) * t, y: cam.y + (target.y - cam.y) * t, zoom: Math.exp(logZ) }
 }
+

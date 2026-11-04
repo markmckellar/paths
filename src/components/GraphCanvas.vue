@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import {
   type Camera,
+  MIN_ZOOM,
   easeCamera,
   fitCamera,
   screenToWorld,
@@ -10,7 +11,7 @@ import {
 } from '../engine/camera'
 import type { Vec } from '../engine/geometry'
 import { type Theme, labelMargin, render } from '../engine/renderer'
-import type { Path, WorldNode } from '../engine/world'
+import type { Box, Path, World, WorldNode } from '../engine/world'
 import type { Simulation } from '../simulation'
 import NodePopover from './NodePopover.vue'
 
@@ -38,6 +39,11 @@ let lastFrame = 0
 /** Pixels the pointer may wander before a press becomes a drag instead of a click. */
 const DRAG_THRESHOLD = 4
 const FIT_PADDING = 56
+/** Zoom the graph is shown at while it has room: labels at their natural size. */
+const ROOM_ZOOM = 1
+/** How quickly the view zooms out when the graph is cramped (and back in), per frame. */
+const ROOM_ZOOM_OUT = 0.996
+const ROOM_ZOOM_IN = 1.002
 
 // ------------------------------------------------------------------ theme
 
@@ -75,6 +81,7 @@ function resize(): void {
   size.value = { width, height }
   c.width = Math.round(width * dpr)
   c.height = Math.round(height * dpr)
+  overlayReadIn = 0
 }
 
 // ------------------------------------------------------------------ frame loop
@@ -88,7 +95,9 @@ function frame(now: number): void {
   // On phones the details sheet covers the bottom; frame the graph in the space above it.
   const inset = selected.value ? bottomInset.value : 0
   const free = { width: size.value.width, height: Math.max(80, size.value.height - inset) }
-  if (autoFit.value) {
+  if (autoFit.value && world.fillView) {
+    fillRoom(world, free, inset)
+  } else if (autoFit.value) {
     const b = world.bounds()
     if (b) {
       // Fixed-size labels aren't in the bounds (see World.bounds); leave room for them on screen.
@@ -121,6 +130,61 @@ function frame(now: number): void {
 
   anchor.value = selectedAnchor()
   raf = requestAnimationFrame(frame)
+}
+
+/** Zoom the room is shown at; drops below ROOM_ZOOM only when the graph won't fit otherwise. */
+let roomZoom = ROOM_ZOOM
+
+/**
+ * The window is the room the graph spreads out to fill; the clock, legend and tips drawn over
+ * it are areas to keep clear. The camera just frames the room, zooming out only when the graph
+ * is too big to fit even packed tight, and back in once it has room again.
+ */
+function fillRoom(world: World, free: { width: number; height: number }, inset: number): void {
+  if (world.cramped) roomZoom = Math.max(MIN_ZOOM, roomZoom * ROOM_ZOOM_OUT)
+  else if (roomZoom < ROOM_ZOOM && world.spread > 1.3) roomZoom = Math.min(ROOM_ZOOM, roomZoom * ROOM_ZOOM_IN)
+  const { width, height } = size.value
+  const toWorld = (x: number, y: number) => ({ x: (x - width / 2) / roomZoom, y: (y - height / 2) / roomZoom })
+  const a = toWorld(0, 0)
+  const b = toWorld(width, height)
+  world.room = { minX: a.x, minY: a.y, maxX: b.x, maxY: b.y }
+  world.keepOut = overlays().map((r) => {
+    const p = toWorld(r.x, r.y)
+    const q = toWorld(r.x + r.w, r.y + r.h)
+    return { minX: p.x, minY: p.y, maxX: q.x, maxY: q.y } satisfies Box
+  })
+  // On phones the details sheet covers the bottom: fit the whole room into the space above it.
+  const target = fitCamera(world.room, free, 0, roomZoom)
+  target.y += inset / 2 / target.zoom
+  const snap = snapFrames > 0
+  if (snapFrames > 0) snapFrames--
+  camera = easeCamera(camera, target, snap ? 1 : 0.05)
+}
+
+/** Frames between re-reading where the overlays are: reading layout every frame is costly. */
+const OVERLAY_READ_FRAMES = 30
+let overlayCache: { x: number; y: number; w: number; h: number }[] = []
+let overlayReadIn = 0
+
+/** Things drawn over the graph (clock, legend, tips), in canvas pixels. */
+function overlays(): { x: number; y: number; w: number; h: number }[] {
+  if (overlayReadIn-- > 0) return overlayCache
+  overlayReadIn = OVERLAY_READ_FRAMES
+  overlayCache = readOverlays()
+  return overlayCache
+}
+
+function readOverlays(): { x: number; y: number; w: number; h: number }[] {
+  const el = stage.value
+  if (!el?.parentElement) return []
+  const origin = el.getBoundingClientRect()
+  const out: { x: number; y: number; w: number; h: number }[] = []
+  for (const o of el.parentElement.querySelectorAll('[data-graph-overlay]')) {
+    const r = o.getBoundingClientRect()
+    if (r.width === 0 || r.height === 0) continue
+    out.push({ x: r.left - origin.left, y: r.top - origin.top, w: r.width, h: r.height })
+  }
+  return out
 }
 
 /**
@@ -340,6 +404,8 @@ let snapFrames = 3
 
 function snapToFit(): void {
   camera = { x: 0, y: 0, zoom: 1 }
+  roomZoom = ROOM_ZOOM
+  overlayReadIn = 0
   autoFit.value = true
   snapFrames = 3
 }

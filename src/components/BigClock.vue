@@ -15,7 +15,7 @@ defineProps<{
 </script>
 
 <template>
-  <div class="big-clock" role="timer" aria-label="Clock">
+  <div class="big-clock" data-graph-overlay role="timer" aria-label="Clock">
     <div class="time">{{ time }}</div>
     <div v-if="caption" class="caption">{{ caption }}</div>
     <template v-if="progress !== undefined">
