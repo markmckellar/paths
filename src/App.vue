@@ -2,6 +2,7 @@
 import { computed, markRaw, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
 import GraphCanvas from './components/GraphCanvas.vue'
 import BigClock from './components/BigClock.vue'
+import { vSteadyWidth } from './steadyWidth'
 import ShapeIcon from './components/ShapeIcon.vue'
 import { labScenario } from './demo/lab'
 import { pipelineScenario } from './demo/pipeline'
@@ -262,19 +263,19 @@ const walkerTypes = computed(() => {
       <dl class="readout" aria-live="off">
         <div>
           <dt>Clock</dt>
-          <dd class="mono">{{ clock }}</dd>
+          <dd v-steady-width="scenario.key" class="mono">{{ clock }}</dd>
         </div>
         <div>
           <dt>{{ scenario.words.active }}</dt>
-          <dd>{{ stats.activeWalkers }}</dd>
+          <dd v-steady-width="scenario.key">{{ stats.activeWalkers }}</dd>
         </div>
         <div v-if="scenario.showDone">
           <dt>Done</dt>
-          <dd>{{ stats.completed }}</dd>
+          <dd v-steady-width="scenario.key">{{ stats.completed }}</dd>
         </div>
         <div>
           <dt>{{ scenario.words.states }}</dt>
-          <dd>{{ stats.junctions }}</dd>
+          <dd v-steady-width="scenario.key">{{ stats.junctions }}</dd>
         </div>
       </dl>
     </header>
@@ -284,13 +285,14 @@ const walkerTypes = computed(() => {
 
       <BigClock
         v-if="showBigClock"
+        v-steady-width="scenario.key"
         :time="bigClock.time"
         :caption="bigClock.caption"
         :progress="bigClock.progress"
         :scale="bigClock.scale"
       />
 
-      <aside class="legend" data-graph-overlay :class="{ folded: !legendOpen }" aria-label="Legend">
+      <aside v-steady-width="[scenario.key, legendOpen]" class="legend" data-graph-overlay :class="{ folded: !legendOpen }" aria-label="Legend">
         <button
           type="button"
           class="legend-toggle"
